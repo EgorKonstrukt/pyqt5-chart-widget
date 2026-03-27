@@ -6,6 +6,9 @@ Built for an industrial powder feeder control application where the charting lib
 
 ---
 
+<img width="800" height="504" alt="image" src="https://github.com/user-attachments/assets/25f9c45c-dedb-44fb-802e-77f6a52f29ea" />
+
+
 ## What it does
 
 - Line plots and scatter series on the same canvas
