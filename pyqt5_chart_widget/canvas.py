@@ -45,7 +45,7 @@ class _PlotCanvas(QWidget):
 
     def _plot_rect(self) -> QRect:
         ml = _ML
-        if self._chart._label_left:
+        if self._chart.label_left:
             ml += 4
         return QRect(ml, _MT, max(1, self.width() - ml - _MR), max(1, self.height() - _MT - _MB))
 
@@ -59,7 +59,7 @@ class _PlotCanvas(QWidget):
         best_d = float("inf")
         best = None
         c = self._chart
-        all_items = [i for i in c._lines + c._scatters if i.visible]
+        all_items = [i for i in c.lines + c.scatters if i.visible]
         for item in all_items:
             for xi, yi in zip(item.xs, item.ys):
                 pt = self._to_pt(xi, yi, x0, dx, y0, dy, pr)
@@ -88,21 +88,21 @@ class _PlotCanvas(QWidget):
         if not pr.contains(ev.pos()):
             return
         c = self._chart
-        cx = c._vx0 + (ev.pos().x() - pr.left()) / pr.width() * (c._vx1 - c._vx0)
-        cy = c._vy0 + (pr.bottom() - ev.pos().y()) / pr.height() * (c._vy1 - c._vy0)
+        cx = c.vx0 + (ev.pos().x() - pr.left()) / pr.width() * (c.vx1 - c.vx0)
+        cy = c.vy0 + (pr.bottom() - ev.pos().y()) / pr.height() * (c.vy1 - c.vy0)
         factor = 1.0 / _ZOOM_FACTOR if ev.angleDelta().y() > 0 else _ZOOM_FACTOR
-        c._vx0 = cx + (c._vx0 - cx) * factor
-        c._vx1 = cx + (c._vx1 - cx) * factor
-        c._vy0 = cy + (c._vy0 - cy) * factor
-        c._vy1 = cy + (c._vy1 - cy) * factor
+        c._vx0 = cx + (c.vx0 - cx) * factor
+        c._vx1 = cx + (c.vx1 - cx) * factor
+        c._vy0 = cy + (c.vy0 - cy) * factor
+        c._vy1 = cy + (c.vy1 - cy) * factor
         self.update()
         ev.accept()
 
     def mousePressEvent(self, ev: QMouseEvent):
         if ev.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton):
             self._pan_start = QPointF(ev.pos())
-            self._pan_vx0 = self._chart._vx0
-            self._pan_vy0 = self._chart._vy0
+            self._pan_vx0 = self._chart.vx0
+            self._pan_vy0 = self._chart.vy0
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             ev.accept()
 
@@ -111,8 +111,8 @@ class _PlotCanvas(QWidget):
         self._mouse_pos = QPointF(ev.pos()) if pr.contains(ev.pos()) else None
         if self._pan_start is not None:
             c = self._chart
-            vdx = c._vx1 - c._vx0
-            vdy = c._vy1 - c._vy0
+            vdx = c.vx1 - c.vx0
+            vdy = c.vy1 - c.vy0
             ddx = (ev.pos().x() - self._pan_start.x()) / pr.width() * vdx
             ddy = (ev.pos().y() - self._pan_start.y()) / pr.height() * vdy
             c._vx0 = self._pan_vx0 - ddx
@@ -144,12 +144,12 @@ class _PlotCanvas(QWidget):
         lb_col = QColor(fg); lb_col.setAlpha(255)
         p.fillRect(self.rect(), bg)
         pr = self._plot_rect()
-        x0, x1 = c._vx0, c._vx1
-        y0, y1 = c._vy0, c._vy1
+        x0, x1 = c.vx0, c.vx1
+        y0, y1 = c.vy0, c.vy1
         dx = x1 - x0 or 1.0
         dy = y1 - y0 or 1.0
-        fm = QFontMetrics(c._font)
-        p.setFont(c._font)
+        fm = QFontMetrics(c.font)
+        p.setFont(c.font)
         xt = nice_ticks(x0, x1)
         yt = nice_ticks(y0, y1)
         p.setPen(QPen(gr_col, 1, Qt.PenStyle.DotLine))
@@ -172,18 +172,18 @@ class _PlotCanvas(QWidget):
             lbl = fmt(tv)
             lw = fm.horizontalAdvance(lbl)
             p.drawText(pr.left() - lw - 6, sy + fm.ascent() // 2, lbl)
-        if c._label_bottom:
-            lw = fm.horizontalAdvance(c._label_bottom)
-            p.drawText(pr.left() + (pr.width() - lw) // 2, self.height() - 3, c._label_bottom)
-        if c._label_left:
+        if c.label_bottom:
+            lw = fm.horizontalAdvance(c.label_bottom)
+            p.drawText(pr.left() + (pr.width() - lw) // 2, self.height() - 3, c.label_bottom)
+        if c.label_left:
             p.save()
             p.translate(11, pr.top() + pr.height() // 2)
             p.rotate(-90)
-            lw = fm.horizontalAdvance(c._label_left)
-            p.drawText(-lw // 2, fm.ascent() // 2, c._label_left)
+            lw = fm.horizontalAdvance(c.label_left)
+            p.drawText(-lw // 2, fm.ascent() // 2, c.label_left)
             p.restore()
         p.setClipRect(pr)
-        for ln in c._inflines:
+        for ln in c.inflines:
             if not ln.visible:
                 continue
             p.setPen(ln.pen)
@@ -195,13 +195,13 @@ class _PlotCanvas(QWidget):
                 p.drawLine(sx, pr.top(), sx, pr.bottom())
         x_lo = min(x0, x1)
         x_hi = max(x0, x1)
-        for fit in c._fits:
+        for fit in c.fits:
             if not fit.visible:
                 continue
             fit._recompute(x_lo, x_hi)
-            if len(fit._xs) < 2:
+            if len(fit.xs) < 2:
                 continue
-            pts = [self._to_pt(xi, yi, x0, dx, y0, dy, pr) for xi, yi in zip(fit._xs, fit._ys)]
+            pts = [self._to_pt(xi, yi, x0, dx, y0, dy, pr) for xi, yi in zip(fit.xs, fit.ys)]
             path = QPainterPath()
             path.moveTo(pts[0])
             for pt in pts[1:]:
@@ -209,7 +209,7 @@ class _PlotCanvas(QWidget):
             p.setPen(fit.pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
-        for item in c._lines:
+        for item in c.lines:
             if not item.visible or len(item.xs) < 2:
                 continue
             pts = [self._to_pt(xi, yi, x0, dx, y0, dy, pr) for xi, yi in zip(item.xs, item.ys)]
@@ -220,7 +220,7 @@ class _PlotCanvas(QWidget):
             p.setPen(item.pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
-        for item in c._scatters:
+        for item in c.scatters:
             if not item.visible or not item.xs:
                 continue
             p.setPen(QPen(item.color.darker(150), 1))
@@ -234,7 +234,7 @@ class _PlotCanvas(QWidget):
         p.setClipping(False)
         if self._show_analytics:
             self._paint_analytics(p, pr, fg, bg, fm)
-        if c._show_legend:
+        if c.show_legend:
             self._paint_legend(p, pr, fg, bg, fm)
         p.end()
 
@@ -257,7 +257,7 @@ class _PlotCanvas(QWidget):
         p.drawEllipse(snap, _SNAP_DOT_R, _SNAP_DOT_R)
         slope = self._tangent_slope(item, xi)
         if slope is not None:
-            half = (c._vx1 - c._vx0) * _TANGENT_HALF_FRAC
+            half = (c.vx1 - c.vx0) * _TANGENT_HALF_FRAC
             tp0 = self._to_pt(xi - half, yi - slope * half, x0, dx, y0, dy, pr)
             tp1 = self._to_pt(xi + half, yi + slope * half, x0, dx, y0, dy, pr)
             tg_col = QColor(fg); tg_col.setAlpha(140)
@@ -267,8 +267,8 @@ class _PlotCanvas(QWidget):
         self._paint_tooltip(p, pr, xi, yi, snap, fg, bg)
 
     def _paint_tooltip(self, p, pr, xi, yi, snap, fg, bg):
-        fm = QFontMetrics(self._chart._font)
-        p.setFont(self._chart._font)
+        fm = QFontMetrics(self._chart.font)
+        p.setFont(self._chart.font)
         lx = f"{tr('chart_widget.tooltip_x')}: {fmt(xi)}"
         ly = f"{tr('chart_widget.tooltip_y')}: {fmt(yi)}"
         tw = max(fm.horizontalAdvance(lx), fm.horizontalAdvance(ly)) + 16
@@ -289,11 +289,11 @@ class _PlotCanvas(QWidget):
     def _paint_analytics(self, p, pr, fg, bg, fm):
         c = self._chart
         named = []
-        for i, it in enumerate(c._lines):
+        for i, it in enumerate(c.lines):
             if it.xs and it.visible:
                 label = it.label or tr("chart_widget.analytics_line", n=i + 1)
                 named.append((label, it))
-        for i, it in enumerate(c._scatters):
+        for i, it in enumerate(c.scatters):
             if it.xs and it.visible:
                 label = it.label or tr("chart_widget.analytics_scatter", n=i + 1)
                 named.append((label, it))
@@ -331,7 +331,7 @@ class _PlotCanvas(QWidget):
         p.setBrush(QBrush(bg_))
         p.setPen(QPen(brd_, 1))
         p.drawRoundedRect(ax, ay, total_w, total_h, 4, 4)
-        bold_f = QFont(self._chart._font); bold_f.setBold(True)
+        bold_f = QFont(self._chart.font); bold_f.setBold(True)
         hdr_col = QColor(fg); hdr_col.setAlpha(220)
         lbl_col = QColor(fg); lbl_col.setAlpha(150)
         for ci, (name, _) in enumerate(named):
@@ -339,7 +339,7 @@ class _PlotCanvas(QWidget):
             p.setFont(bold_f)
             p.setPen(hdr_col)
             p.drawText(cx - fm.horizontalAdvance(name) // 2, ay + pad + fm.ascent(), name)
-        p.setFont(self._chart._font)
+        p.setFont(self._chart.font)
         for ri, lbl in enumerate(row_lbls):
             ry = ay + pad + hdr_h + ri * rh
             p.setPen(lbl_col)
@@ -354,18 +354,18 @@ class _PlotCanvas(QWidget):
     def _paint_legend(self, p, pr, fg, bg, fm):
         c = self._chart
         entries = []
-        for i, it in enumerate(c._lines):
+        for i, it in enumerate(c.lines):
             if not it.visible:
                 continue
             label = it.label or tr("chart_widget.legend_label", n=i + 1)
             color = it.pen.color()
             entries.append((label, color, False))
-        for i, it in enumerate(c._scatters):
+        for i, it in enumerate(c.scatters):
             if not it.visible:
                 continue
-            label = it.label or tr("chart_widget.legend_label", n=len(c._lines) + i + 1)
+            label = it.label or tr("chart_widget.legend_label", n=len(c.lines) + i + 1)
             entries.append((label, it.color, True))
-        for i, fit in enumerate(c._fits):
+        for i, fit in enumerate(c.fits):
             if not fit.visible:
                 continue
             label = fit.label or tr("chart_widget.analytics_fit", n=i + 1)
@@ -384,7 +384,7 @@ class _PlotCanvas(QWidget):
         p.setBrush(QBrush(bg_))
         p.setPen(QPen(brd_, 1))
         p.drawRoundedRect(lx, ly, max_w, total_h, 4, 4)
-        p.setFont(self._chart._font)
+        p.setFont(self._chart.font)
         for i, (label, color, is_scatter) in enumerate(entries):
             ry = ly + pad + i * row_h + (row_h - sw) // 2
             if is_scatter:

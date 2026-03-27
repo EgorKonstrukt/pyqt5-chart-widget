@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Callable, List, Optional, Tuple
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                              QPushButton, QSizePolicy, QToolButton, QFrame)
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QPalette
+
+from typing import Callable
+
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel,
+                             QSizePolicy, QToolButton, QFrame)
 
 
 class SidebarButton(QToolButton):

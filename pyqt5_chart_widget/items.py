@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import List, Optional, TYPE_CHECKING
-from PyQt5.QtCore import Qt
+
+from typing import List, TYPE_CHECKING
+
 from PyQt5.QtGui import QColor, QPen
 
 if TYPE_CHECKING:

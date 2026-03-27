@@ -23,39 +23,39 @@ def _sort_unique(x: List[float], y: List[float]) -> Tuple[List[float], List[floa
     return xs, ys
 
 
-def _gauss_solve(A: List[List[float]], b: List[float]) -> List[float]:
+def _gauss_solve(a: List[List[float]], b: List[float]) -> List[float]:
     n = len(b)
-    A = [row[:] for row in A]
+    a = [row[:] for row in a]
     b = b[:]
     for col in range(n):
-        pivot = max(range(col, n), key=lambda r: abs(A[r][col]))
-        A[col], A[pivot] = A[pivot], A[col]
+        pivot = max(range(col, n), key=lambda r: abs(a[r][col]))
+        a[col], a[pivot] = a[pivot], a[col]
         b[col], b[pivot] = b[pivot], b[col]
-        if abs(A[col][col]) < 1e-15:
+        if abs(a[col][col]) < 1e-15:
             continue
-        f = A[col][col]
-        A[col] = [v / f for v in A[col]]
+        f = a[col][col]
+        a[col] = [v / f for v in a[col]]
         b[col] /= f
         for row in range(n):
             if row == col:
                 continue
-            fac = A[row][col]
-            A[row] = [A[row][j] - fac * A[col][j] for j in range(n)]
+            fac = a[row][col]
+            a[row] = [a[row][j] - fac * a[col][j] for j in range(n)]
             b[row] -= fac * b[col]
     return b
 
 
 def _polyfit(x: List[float], y: List[float], deg: int) -> List[float]:
     d = deg + 1
-    VtV = [[0.0] * d for _ in range(d)]
-    Vty = [0.0] * d
+    vt_v = [[0.0] * d for _ in range(d)]
+    vt_y = [0.0] * d
     for xi, yi in zip(x, y):
         row = [xi ** (deg - j) for j in range(d)]
         for r in range(d):
             for c in range(d):
-                VtV[r][c] += row[r] * row[c]
-            Vty[r] += row[r] * yi
-    return _gauss_solve(VtV, Vty)
+                vt_v[r][c] += row[r] * row[c]
+            vt_y[r] += row[r] * yi
+    return _gauss_solve(vt_v, vt_y)
 
 
 def _polyval(coeffs: List[float], x: float) -> float:

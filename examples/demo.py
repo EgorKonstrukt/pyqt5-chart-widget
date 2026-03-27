@@ -33,7 +33,7 @@ class DemoWindow(QMainWindow):
         self.chart.autofit()
 
         self.line1 = self.chart.plot(label="Pump A", width=2, color="#3498db")
-        self.line2 = self.chart.plot(label="Pump B", width=2, color="#2ecc71")
+        self.line2 = self.chart.plot(label="Pump B", width=3, color="#2ecc71")
         self.scatter1 = self.chart.addScatter(size=8, label="Samples", color="#f39c12")
 
         self.fit1 = self.chart.addFit(self.line1, mode_key="poly3", dashed=True, label="Fit A")
