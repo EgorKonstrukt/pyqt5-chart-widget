@@ -2,8 +2,8 @@ from setuptools import setup, find_packages
 
 setup(
     name="pyqt5-chart-widget",
-    version="1.0.0",
-    description="Lightweight interactive chart widget for PyQt5",
+    version="2.0.0",
+    description="Lightweight interactive chart widget for PyQt5 with built-in approximation, multi-series, and extensible fit modes",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     author="Zarrakun",
@@ -13,7 +13,7 @@ setup(
     packages=find_packages(include=["pyqt5_chart_widget*"]),
     python_requires=">=3.8",
     install_requires=["PyQt5>=5.15"],
-    keywords=["pyqt5", "chart", "plot", "widget", "gui"],
+    keywords=["pyqt5", "chart", "plot", "widget", "gui", "approximation", "curve fitting"],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
