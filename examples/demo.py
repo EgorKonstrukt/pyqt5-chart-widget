@@ -74,7 +74,6 @@ class DemoWindow(QMainWindow):
         self.line1.setData([], [])
         self.line2.setData([], [])
         self.scatter1.setData([], [])
-        self.chart.autofit()
 
     def _update_data(self):
         self._tick += 1
@@ -106,9 +105,6 @@ class DemoWindow(QMainWindow):
         self.line1.setData(xs=self._xs, ys=self._ys1)
         self.line2.setData(xs=self._xs, ys=self._ys2)
         self.scatter1.setData(x=self._scatter_x, y=self._scatter_y)
-
-        if self._tick % 10 == 0:
-            self.chart.autofit()
 
 
 if __name__ == "__main__":

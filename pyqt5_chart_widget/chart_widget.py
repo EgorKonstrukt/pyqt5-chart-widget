@@ -11,7 +11,10 @@ from .sidebar import SidebarLabel
 from .i18n import tr
 from .math_utils import get_fit_modes, get_fit_mode
 from .palette import next_line_color, next_scatter_color
+
 _AnyItem = Union[_LineItem, _ScatterItem]
+
+
 class ChartWidget(QWidget):
     def __init__(self, parent=None, *,
                  show_toolbar: bool = True,
@@ -19,7 +22,8 @@ class ChartWidget(QWidget):
                  show_sidebar: bool = False,
                  font: Optional[QFont] = None,
                  anim_duration: int = 150,
-                 anim_easing: QEasingCurve.Type = QEasingCurve.Type.OutQuint):
+                 anim_easing: QEasingCurve.Type = QEasingCurve.Type.OutQuint,
+                 threaded_fit: bool = False):
         super().__init__(parent)
         self._lines: List[_LineItem] = []
         self._scatters: List[_ScatterItem] = []
@@ -32,6 +36,8 @@ class ChartWidget(QWidget):
         self._vy0 = 0.0; self._vy1 = 1.0
         self._show_legend = show_legend
         self._active_fit_key: Optional[str] = None
+        self._autofit_enabled = True
+        self._threaded_fit = threaded_fit
         self._canvas = _PlotCanvas(self)
         self._toolbar_layout = self._build_toolbar()
         self._toolbar_widget = QWidget(self)
@@ -58,7 +64,42 @@ class ChartWidget(QWidget):
         root.addLayout(content, 1)
         self.setMinimumSize(200, 140)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def _make_btn(self, icon_sp: str, lbl_key: str, tip_key: str, slot) -> QToolButton:
+        btn = QToolButton(self)
+        btn.setText(tr(lbl_key))
+        btn.setToolTip(tr(tip_key))
+        btn.setIcon(self.style().standardIcon(getattr(QStyle.StandardPixmap, icon_sp)))
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        btn.setFixedHeight(24)
+        btn.clicked.connect(slot)
+        return btn
+
+    def _make_toggle_btn(self, lbl_key: str, tip_key: str,
+                         default_checked: bool, slot) -> QToolButton:
+        btn = QToolButton(self)
+        btn.setText(tr(lbl_key))
+        btn.setToolTip(tr(tip_key))
+        btn.setCheckable(True)
+        btn.setChecked(default_checked)
+        btn.setFixedHeight(24)
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        btn.toggled.connect(slot)
+        return btn
+
     def _build_toolbar(self) -> QHBoxLayout:
+        self._btn_autofit_toggle = self._make_toggle_btn(
+            "chart_widget.btn_autofit_toggle",
+            "chart_widget.btn_autofit_toggle_tip",
+            True,
+            self.setAutofitEnabled,
+        )
+        self._btn_latest_toggle = self._make_toggle_btn(
+            "chart_widget.btn_latest",
+            "chart_widget.btn_latest_tip",
+            False,
+            self.setLatestPointVisible,
+        )
         self._btn_fit = self._make_btn("SP_FileDialogContentsView",
                                        "chart_widget.btn_fit",
                                        "chart_widget.btn_fit_tip",
@@ -92,48 +133,60 @@ class ChartWidget(QWidget):
         tb.setContentsMargins(2, 2, 2, 2)
         tb.setSpacing(2)
         tb.addStretch()
-        for w in (self._btn_fit, self._btn_stats, self._btn_fit_mode, self._btn_csv, self._btn_img):
+        for w in (self._btn_autofit_toggle, self._btn_latest_toggle,
+                  self._btn_fit, self._btn_stats, self._btn_fit_mode,
+                  self._btn_csv, self._btn_img):
             tb.addWidget(w)
         return tb
-    def _make_btn(self, icon_sp: str, lbl_key: str, tip_key: str, slot) -> QToolButton:
-        btn = QToolButton(self)
-        btn.setText(tr(lbl_key))
-        btn.setToolTip(tr(tip_key))
-        btn.setIcon(self.style().standardIcon(getattr(QStyle.StandardPixmap, icon_sp)))
-        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        btn.setFixedHeight(24)
-        btn.clicked.connect(slot)
-        return btn
+
     def _on_fit_mode_selected(self, key: str):
         self._active_fit_key = key
         self._update_fit_mode_label()
         for fit in self._fits:
             fit.setModeKey(key)
         self._canvas.update()
+
     def _update_fit_mode_label(self):
         if self._active_fit_key is None:
             self._btn_fit_mode.setText("Approx")
             return
         mode = get_fit_mode(self._active_fit_key)
         lbl = mode.label if mode else self._active_fit_key
-        self._btn_fit_mode.setText(f"{lbl} ▾")
+        self._btn_fit_mode.setText(f"{lbl} ")
+
     def setToolbarVisible(self, visible: bool):
         self._toolbar_widget.setVisible(visible)
+
     def setSidebarVisible(self, visible: bool):
         if self._sidebar:
             self._sidebar.setVisible(visible)
+
     def sidebar(self) -> Optional[SidebarLabel]:
         return self._sidebar
+
     def setLabel(self, side: str, text: str):
         if side == "left": self._label_left = text
         elif side == "bottom": self._label_bottom = text
         self._canvas.update()
+
     def setFont(self, font: QFont):
         self._font = font
         self._canvas.update()
+
     def setLegendVisible(self, visible: bool):
         self._show_legend = visible
         self._canvas.update()
+
+    def setAutofitEnabled(self, enabled: bool):
+        self._autofit_enabled = enabled
+
+    def setLatestPointVisible(self, visible: bool):
+        self._canvas._show_latest = visible
+        self._canvas.update()
+
+    def setThreadedFit(self, threaded: bool):
+        self._threaded_fit = threaded
+
     def plot(self, color: Optional[str] = None, width: int = 2,
              label: str = "", dashed: bool = False) -> _LineItem:
         c = color or next_line_color()
@@ -145,12 +198,14 @@ class ChartWidget(QWidget):
         item = _LineItem(self, pen, label)
         self._lines.append(item)
         return item
+
     def addScatter(self, size: int = 10, color: Optional[str] = None,
                    label: str = "") -> _ScatterItem:
         c = color or next_scatter_color()
         item = _ScatterItem(self, size, QColor(c), label)
         self._scatters.append(item)
         return item
+
     def addFit(self, source: _AnyItem, mode_key: Optional[str] = None,
                color: Optional[str] = None, width: int = 2,
                dashed: bool = True, label: str = "") -> _FitItem:
@@ -165,6 +220,7 @@ class ChartWidget(QWidget):
             self._update_fit_mode_label()
         self._canvas.update()
         return fit
+
     def addLine(self, y: Optional[float] = None, x: Optional[float] = None,
                 color: str = "#f39c12", width: int = 1,
                 dashed: bool = True) -> _InfLine:
@@ -175,17 +231,20 @@ class ChartWidget(QWidget):
         ln = _InfLine(self, horiz, val, pen)
         self._inflines.append(ln)
         return ln
+
     def removeItem(self, item):
         for lst in (self._lines, self._scatters, self._fits, self._inflines):
             if item in lst:
                 lst.remove(item)
         self._canvas.update()
+
     def clearAll(self):
         self._lines.clear()
         self._scatters.clear()
         self._fits.clear()
         self._inflines.clear()
         self._canvas.update()
+
     def _all_xy(self) -> Tuple[List[float], List[float]]:
         xs: List[float] = []
         ys: List[float] = []
@@ -195,6 +254,7 @@ class ChartWidget(QWidget):
             if ln.visible:
                 (ys if ln.horizontal else xs).append(ln.value)
         return xs, ys
+
     def _data_bounds(self) -> Tuple[float, float, float, float]:
         xs, ys = self._all_xy()
         if not xs or not ys:
@@ -206,8 +266,11 @@ class ChartWidget(QWidget):
         px = (x1 - x0) * 0.05
         py = (y1 - y0) * 0.08
         return x0 - px, x1 + px, y0 - py, y1 + py
+
     def _schedule_autofit(self):
-        self.autofit()
+        if self._autofit_enabled:
+            self.autofit()
+
     def autofit(self):
         tgt = self._data_bounds()
         self._anim_start = (self._vx0, self._vx1, self._vy0, self._vy1)
@@ -218,20 +281,21 @@ class ChartWidget(QWidget):
         else:
             self._vx0, self._vx1, self._vy0, self._vy1 = tgt
             self._canvas.update()
+
     def _step_animation(self):
         self._anim_elapsed += 16
         p = min(1.0, self._anim_elapsed / self._anim_dur)
         f = self._anim_easing.valueForProgress(p)
-        bounds = []
-        for s, t in zip(self._anim_start, self._anim_target):
-            bounds.append(s + (t - s) * f)
+        bounds = [s + (t - s) * f for s, t in zip(self._anim_start, self._anim_target)]
         self._vx0, self._vx1, self._vy0, self._vy1 = bounds
         self._canvas.update()
         if p >= 1.0:
             self._anim_timer.stop()
+
     def update(self):
         self._canvas.update()
         super().update()
+
     def refreshFitMenu(self):
         self._fit_menu.clear()
         for mode in get_fit_modes():
@@ -239,6 +303,7 @@ class ChartWidget(QWidget):
             act.setData(mode.key)
             act.triggered.connect(lambda checked, k=mode.key: self._on_fit_mode_selected(k))
             self._fit_menu.addAction(act)
+
     def exportCsv(self):
         path, _ = QFileDialog.getSaveFileName(
             self, tr("chart_widget.csv_title"), "chart_data.csv",
@@ -266,6 +331,7 @@ class ChartWidget(QWidget):
                     for v in (s[2][row] if row < len(s[2]) else "",
                               s[3][row] if row < len(s[3]) else "")
                 ])
+
     def exportImage(self):
         path, _ = QFileDialog.getSaveFileName(
             self, tr("chart_widget.img_title"), "chart.png",
@@ -273,41 +339,31 @@ class ChartWidget(QWidget):
         if not path:
             return
         self._canvas.grab_image().save(path)
+
     def grabImage(self) -> QPixmap:
         return self._canvas.grab_image()
+
     @property
-    def vx0(self):
-        return self._vx0
+    def vx0(self): return self._vx0
     @property
-    def font(self):
-        return self._font
+    def vx1(self): return self._vx1
     @property
-    def fits(self):
-        return self._fits
+    def vy0(self): return self._vy0
     @property
-    def lines(self):
-        return self._lines
+    def vy1(self): return self._vy1
     @property
-    def scatters(self):
-        return self._scatters
+    def font(self): return self._font
     @property
-    def vx1(self):
-        return self._vx1
+    def fits(self): return self._fits
     @property
-    def show_legend(self):
-        return self._show_legend
+    def lines(self): return self._lines
     @property
-    def inflines(self):
-        return self._inflines
+    def scatters(self): return self._scatters
     @property
-    def label_left(self):
-        return self._label_left
+    def inflines(self): return self._inflines
     @property
-    def label_bottom(self):
-        return self._label_bottom
+    def show_legend(self): return self._show_legend
     @property
-    def vy1(self):
-        return self._vy1
+    def label_left(self): return self._label_left
     @property
-    def vy0(self):
-        return self._vy0
+    def label_bottom(self): return self._label_bottom

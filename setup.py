@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pyqt5-chart-widget",
-    version="2.0.0",
+    version="3.0.0",
     description="Lightweight interactive chart widget for PyQt5 with built-in approximation, multi-series, and extensible fit modes",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",

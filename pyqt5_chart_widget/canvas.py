@@ -9,7 +9,6 @@ from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont,
 from .math_utils import nice_ticks, fmt
 from .items import _LineItem, _ScatterItem, _FitItem, _InfLine
 from .i18n import tr
-
 if TYPE_CHECKING:
     from .chart_widget import ChartWidget
 
@@ -24,6 +23,8 @@ _TOOLTIP_MARGIN = 14
 _SNAP_DOT_R = 5.0
 _LEGEND_PAD = 8
 _LEGEND_SWATCH = 12
+_LATEST_TAG_PAD = 3
+_LATEST_TAG_ROUND = 3
 
 
 class _PlotCanvas(QWidget):
@@ -35,6 +36,7 @@ class _PlotCanvas(QWidget):
         self._pan_vy0 = 0.0
         self._mouse_pos: Optional[QPointF] = None
         self._show_analytics = False
+        self._show_latest = False
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
         self.setMouseTracking(True)
@@ -43,10 +45,12 @@ class _PlotCanvas(QWidget):
         self._show_analytics = not self._show_analytics
         self.update()
 
+    def toggleLatestPoint(self):
+        self._show_latest = not self._show_latest
+        self.update()
+
     def _plot_rect(self) -> QRect:
-        ml = _ML
-        if self._chart.label_left:
-            ml += 4
+        ml = _ML + (4 if self._chart.label_left else 0)
         return QRect(ml, _MT, max(1, self.width() - ml - _MR), max(1, self.height() - _MT - _MB))
 
     def _to_pt(self, xv, yv, x0, dx, y0, dy, pr) -> QPointF:
@@ -55,22 +59,63 @@ class _PlotCanvas(QWidget):
             pr.bottom() - (yv - y0) / dy * pr.height(),
         )
 
+    def _nearest_on_segments(self, mouse: QPointF, xs: List[float], ys: List[float],
+                              pr, x0, dx, y0, dy) -> Optional[Tuple[float, float, float]]:
+        if not xs:
+            return None
+        if len(xs) == 1:
+            pt = self._to_pt(xs[0], ys[0], x0, dx, y0, dy, pr)
+            return (xs[0], ys[0], math.hypot(pt.x() - mouse.x(), pt.y() - mouse.y()))
+        best_d = float("inf")
+        best_xi, best_yi = xs[0], ys[0]
+        for i in range(len(xs) - 1):
+            pt0 = self._to_pt(xs[i], ys[i], x0, dx, y0, dy, pr)
+            pt1 = self._to_pt(xs[i + 1], ys[i + 1], x0, dx, y0, dy, pr)
+            seg_x = pt1.x() - pt0.x()
+            seg_y = pt1.y() - pt0.y()
+            seg_len2 = seg_x * seg_x + seg_y * seg_y
+            t = 0.0 if seg_len2 < 1e-10 else max(0.0, min(1.0,
+                ((mouse.x() - pt0.x()) * seg_x + (mouse.y() - pt0.y()) * seg_y) / seg_len2))
+            nx = pt0.x() + t * seg_x
+            ny = pt0.y() + t * seg_y
+            d = math.hypot(nx - mouse.x(), ny - mouse.y())
+            if d < best_d:
+                best_d = d
+                best_xi = xs[i] + t * (xs[i + 1] - xs[i])
+                best_yi = ys[i] + t * (ys[i + 1] - ys[i])
+        return (best_xi, best_yi, best_d)
+
     def _find_nearest(self, mouse, pr, x0, dx, y0, dy):
         best_d = float("inf")
         best = None
         c = self._chart
-        all_items = [i for i in c.lines + c.scatters if i.visible]
-        for item in all_items:
+        for item in c.scatters:
+            if not item.visible:
+                continue
             for xi, yi in zip(item.xs, item.ys):
                 pt = self._to_pt(xi, yi, x0, dx, y0, dy, pr)
                 d = math.hypot(pt.x() - mouse.x(), pt.y() - mouse.y())
                 if d < best_d:
                     best_d = d
                     best = (xi, yi, d, item)
+        for item in c.lines:
+            if not item.visible or not item.xs:
+                continue
+            r = self._nearest_on_segments(mouse, item.xs, item.ys, pr, x0, dx, y0, dy)
+            if r and r[2] < best_d:
+                best_d = r[2]
+                best = (r[0], r[1], r[2], item)
+        for item in c.fits:
+            if not item.visible or not item.xs:
+                continue
+            r = self._nearest_on_segments(mouse, item.xs, item.ys, pr, x0, dx, y0, dy)
+            if r and r[2] < best_d:
+                best_d = r[2]
+                best = (r[0], r[1], r[2], item)
         return best if best and best[2] <= _SNAP_RADIUS_PX else None
 
     def _tangent_slope(self, item, xi):
-        if not isinstance(item, _LineItem) or len(item.xs) < 2:
+        if not isinstance(item, (_LineItem, _FitItem)) or len(item.xs) < 2:
             return None
         pts = list(zip(item.xs, item.ys))
         idx = min(range(len(pts)), key=lambda i: abs(pts[i][0] - xi))
@@ -198,7 +243,7 @@ class _PlotCanvas(QWidget):
         for fit in c.fits:
             if not fit.visible:
                 continue
-            fit._recompute(x_lo, x_hi)
+            fit._recompute(x_lo, x_hi, threaded=c._threaded_fit)
             if len(fit.xs) < 2:
                 continue
             pts = [self._to_pt(xi, yi, x0, dx, y0, dy, pr) for xi, yi in zip(fit.xs, fit.ys)]
@@ -210,7 +255,7 @@ class _PlotCanvas(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
         for item in c.lines:
-            if not item.visible or len(item.xs) < 2:
+            if not item.visible or not item.raw_visible or len(item.xs) < 2:
                 continue
             pts = [self._to_pt(xi, yi, x0, dx, y0, dy, pr) for xi, yi in zip(item.xs, item.ys)]
             path = QPainterPath()
@@ -221,7 +266,7 @@ class _PlotCanvas(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
         for item in c.scatters:
-            if not item.visible or not item.xs:
+            if not item.visible or not item.raw_visible or not item.xs:
                 continue
             p.setPen(QPen(item.color.darker(150), 1))
             p.setBrush(QBrush(item.color))
@@ -232,11 +277,54 @@ class _PlotCanvas(QWidget):
         if self._mouse_pos is not None:
             self._paint_crosshair(p, pr, x0, dx, y0, dy, fg, bg)
         p.setClipping(False)
+        if self._show_latest:
+            self._paint_latest_points(p, pr, x0, dx, y0, dy, fm)
         if self._show_analytics:
             self._paint_analytics(p, pr, fg, bg, fm)
         if c.show_legend:
             self._paint_legend(p, pr, fg, bg, fm)
         p.end()
+
+    def _paint_latest_points(self, p, pr, x0, dx, y0, dy, fm):
+        c = self._chart
+        entries = []
+        for it in c.lines:
+            if it.visible and it.xs:
+                entries.append((it.xs[-1], it.ys[-1], it.pen.color()))
+        for it in c.scatters:
+            if it.visible and it.xs:
+                entries.append((it.xs[-1], it.ys[-1], it.color))
+        p.setFont(c.font)
+        pad = _LATEST_TAG_PAD
+        rnd = _LATEST_TAG_ROUND
+        th = fm.height()
+        for xi, yi, color in entries:
+            sx = pr.left() + (xi - x0) / dx * pr.width()
+            sy = pr.bottom() - (yi - y0) / dy * pr.height()
+            lum = 0.299 * color.redF() + 0.587 * color.greenF() + 0.114 * color.blueF()
+            txt_col = QColor("#000000") if lum > 0.5 else QColor("#ffffff")
+            x_lbl = fmt(xi)
+            xlw = fm.horizontalAdvance(x_lbl)
+            x_tw = xlw + pad * 2
+            xtx = int(sx) - x_tw // 2
+            xty = pr.bottom() + 2
+            if pr.left() - x_tw <= sx <= pr.right() + x_tw:
+                p.setBrush(QBrush(color))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawRoundedRect(xtx, xty, x_tw, th, rnd, rnd)
+                p.setPen(txt_col)
+                p.drawText(xtx + pad, xty + fm.ascent(), x_lbl)
+            y_lbl = fmt(yi)
+            ylw = fm.horizontalAdvance(y_lbl)
+            y_tw = ylw + pad * 2
+            ytx = pr.left() - y_tw - 4
+            yty = int(sy) - th // 2
+            if pr.top() - th <= sy <= pr.bottom() + th:
+                p.setBrush(QBrush(color))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawRoundedRect(ytx, yty, y_tw, th, rnd, rnd)
+                p.setPen(txt_col)
+                p.drawText(ytx + pad, yty + fm.ascent(), y_lbl)
 
     def _paint_crosshair(self, p, pr, x0, dx, y0, dy, fg, bg):
         mp = self._mouse_pos
@@ -291,12 +379,10 @@ class _PlotCanvas(QWidget):
         named = []
         for i, it in enumerate(c.lines):
             if it.xs and it.visible:
-                label = it.label or tr("chart_widget.analytics_line", n=i + 1)
-                named.append((label, it))
+                named.append((it.label or tr("chart_widget.analytics_line", n=i + 1), it))
         for i, it in enumerate(c.scatters):
             if it.xs and it.visible:
-                label = it.label or tr("chart_widget.analytics_scatter", n=i + 1)
-                named.append((label, it))
+                named.append((it.label or tr("chart_widget.analytics_scatter", n=i + 1), it))
         named = named[:_ANALYTICS_MAX_SERIES]
         if not named:
             return
@@ -310,7 +396,7 @@ class _PlotCanvas(QWidget):
         table: List[List[str]] = []
         for _, it in named:
             n = len(it.xs)
-            st = fmt(statistics.stdev(it.ys)) if n > 1 else "—"
+            st = fmt(statistics.stdev(it.ys)) if n > 1 else "-"
             table.append([
                 str(n), fmt(min(it.xs)), fmt(max(it.xs)),
                 fmt(min(it.ys)), fmt(max(it.ys)),
@@ -357,19 +443,15 @@ class _PlotCanvas(QWidget):
         for i, it in enumerate(c.lines):
             if not it.visible:
                 continue
-            label = it.label or tr("chart_widget.legend_label", n=i + 1)
-            color = it.pen.color()
-            entries.append((label, color, False))
+            entries.append((it.label or tr("chart_widget.legend_label", n=i + 1), it.pen.color(), False))
         for i, it in enumerate(c.scatters):
             if not it.visible:
                 continue
-            label = it.label or tr("chart_widget.legend_label", n=len(c.lines) + i + 1)
-            entries.append((label, it.color, True))
+            entries.append((it.label or tr("chart_widget.legend_label", n=len(c.lines) + i + 1), it.color, True))
         for i, fit in enumerate(c.fits):
             if not fit.visible:
                 continue
-            label = fit.label or tr("chart_widget.analytics_fit", n=i + 1)
-            entries.append((label, fit.pen.color(), False))
+            entries.append((fit.label or tr("chart_widget.analytics_fit", n=i + 1), fit.pen.color(), False))
         if not entries:
             return
         pad = _LEGEND_PAD
