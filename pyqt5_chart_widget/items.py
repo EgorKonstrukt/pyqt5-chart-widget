@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QColor, QPen
 if TYPE_CHECKING:
@@ -150,6 +150,28 @@ class _FitItem:
         hi = x_hi if x_hi is not None else (max(self.source.xs) if self.source.xs else 1.0)
         self._recompute(lo, hi, n_pts, threaded=False)
         return list(self._xs), list(self._ys)
+    def evaluate(self, x: Union[float, List[float]]) -> Union[Optional[float], List[Optional[float]]]:
+        scalar = isinstance(x, (int, float))
+        x_list = [float(x)] if scalar else [float(v) for v in x]
+        if not x_list:
+            return []
+        from .math_utils import get_fit_mode, _sort_unique
+        mode = get_fit_mode(self.mode_key)
+        if mode is None or not self.source.xs:
+            return None if scalar else [None] * len(x_list)
+        xs_s, ys_s = _sort_unique(list(self.source.xs), list(self.source.ys))
+        if len(xs_s) < mode.min_points:
+            return None if scalar else [None] * len(x_list)
+        result = mode.fn(xs_s, ys_s, x_list)
+        return result[0] if scalar else result
+    def asDict(self, x_lo: Optional[float] = None, x_hi: Optional[float] = None,
+               n_pts: int = 400) -> dict:
+        xs, ys = self.getData(x_lo, x_hi, n_pts)
+        return {"x": xs, "y": ys}
+    def asTuples(self, x_lo: Optional[float] = None, x_hi: Optional[float] = None,
+                 n_pts: int = 400) -> List[Tuple[float, float]]:
+        xs, ys = self.getData(x_lo, x_hi, n_pts)
+        return list(zip(xs, ys))
     def setModeKey(self, key: str):
         self.mode_key = key
         self._chart.update()

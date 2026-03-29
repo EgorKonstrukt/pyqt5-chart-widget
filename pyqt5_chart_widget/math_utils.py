@@ -3,6 +3,8 @@ import math
 from bisect import bisect_right
 from typing import Callable, Dict, List, Optional, Tuple
 
+_NICE_TICKS_MAX = 64
+
 
 def linspace(start: float, stop: float, n: int) -> List[float]:
     if n < 2:
@@ -212,27 +214,44 @@ def get_fit_mode(key: str) -> Optional[FitMode]:
 
 
 def nice_ticks(lo: float, hi: float, n: int = 7) -> List[float]:
-    if hi <= lo:
-        return [lo]
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
+        return [lo] if math.isfinite(lo) else []
     span = hi - lo
     raw = span / max(n - 1, 1)
-    mag = 10 ** math.floor(math.log10(raw)) if raw > 0 else 1.0
+    if raw <= 0 or not math.isfinite(raw):
+        return [lo]
+    try:
+        mag = 10.0 ** math.floor(math.log10(raw))
+    except (ValueError, OverflowError):
+        return [lo]
+    if not math.isfinite(mag) or mag <= 0:
+        return [lo]
     step = mag
     for s in (mag, mag * 2, mag * 2.5, mag * 5, mag * 10):
         if span / s <= n + 1:
             step = s
             break
-    start = math.floor(lo / step) * step
+    if not math.isfinite(step) or step <= 0:
+        return [lo]
+    try:
+        start = math.floor(lo / step) * step
+    except (OverflowError, ValueError):
+        return [lo]
     ticks: List[float] = []
     v = start
-    while v <= hi + step * 0.001:
+    while v <= hi + step * 0.001 and len(ticks) < _NICE_TICKS_MAX:
         if v >= lo - step * 0.001:
             ticks.append(round(v, 10))
-        v = round(v + step, 10)
+        nv = round(v + step, 10)
+        if nv <= v:
+            break
+        v = nv
     return ticks
 
 
 def fmt(v: float) -> str:
+    if not math.isfinite(v):
+        return str(v)
     if v == 0:
         return "0"
     if abs(v) >= 1000 or (abs(v) < 0.001 and v != 0):

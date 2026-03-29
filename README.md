@@ -57,6 +57,8 @@ ChartWidget(
     show_sidebar:  bool = False,
     font:          QFont | None = None,
     threaded_fit:  bool = False,
+    grid_px_x:        int = 7,
+    grid_px_y:        int = 7,
 )
 ```
 
@@ -73,6 +75,7 @@ ChartWidget(
 | `setAutofitEnabled(bool)` | Enable/disable auto-fit when data changes (default: `True`) |
 | `setLatestPointVisible(bool)` | Show/hide latest-point badges on axis rulers |
 | `setThreadedFit(bool)` | Switch threaded fit computation on/off at runtime |
+| `setGridDensity(x, y)` | Update grid line count on both axes at runtime |
 | `setToolbarVisible(visible)` | Show/hide the toolbar |
 | `setSidebarVisible(visible)` | Show/hide the sidebar |
 | `setLegendVisible(visible)` | Show/hide the legend overlay |
@@ -116,19 +119,71 @@ hline.setVisible(True)
 
 ## Getting fit data out of the chart
 
+All three methods run synchronously regardless of whether `threaded_fit` is on. They are safe to call from any code path that needs the numbers.
+
+### getData — raw lists
+
 ```python
 fit = chart.addFit(line, mode_key="poly3")
 line.setData(xs=[...], ys=[...])
 
 xs, ys = fit.getData()
-# Returns a 400-point dense evaluation across the source data's x range.
+# 400-point dense evaluation across the source data's x range.
 # Both xs and ys are plain Python lists of floats.
 
 xs, ys = fit.getData(x_lo=0.0, x_hi=500.0, n_pts=1000)
-# Supply an explicit range and resolution when needed.
+# Explicit range and resolution.
 ```
 
-`getData()` always runs synchronously, regardless of whether `threaded_fit` is on. It's safe to call from any code path that needs the numbers.
+### asDict — dictionary form
+
+```python
+result = fit.asDict()
+# {"x": [...], "y": [...]}
+
+result = fit.asDict(x_lo=0.0, x_hi=500.0, n_pts=200)
+```
+
+Useful when passing data to JSON serialization or pandas:
+
+```python
+import pandas as pd
+df = pd.DataFrame(fit.asDict())
+```
+
+### asTuples — list of (x, y) pairs
+
+```python
+points = fit.asTuples()
+# [(x0, y0), (x1, y1), ...]
+
+points = fit.asTuples(x_lo=0.0, x_hi=500.0, n_pts=200)
+```
+
+Convenient for iteration, table rendering, or writing to a file:
+
+```python
+for x, y in fit.asTuples():
+    print(f"{x:.3f}  {y:.3f}")
+```
+
+### evaluate — single point or arbitrary x values
+
+```python
+y = fit.evaluate(250.0)
+# Returns a single float — the model's prediction at x=250.
+
+ys = fit.evaluate([0.0, 100.0, 200.0, 300.0])
+# Returns a list of floats, one per input x.
+# Returns None (scalar) or [None, ...] (list) if the fit cannot be computed.
+```
+
+Use `evaluate` when you need the model's output at specific x values that don't follow a regular grid:
+
+```python
+sensor_readings = [12.4, 87.1, 143.9, 210.0]
+predicted = fit.evaluate(sensor_readings)
+```
 
 ---
 
@@ -182,6 +237,21 @@ chart.setThreadedFit(True)
 While a fit is computing, the canvas shows the previous cached result. The update arrives asynchronously and triggers a repaint automatically. If you zoom or pan quickly, the pending computation is queued and runs once the in-flight worker finishes.
 
 Leave `threaded_fit=False` (the default) if creating threads is not allowed in your environment — some embedded runtimes, multiprocessing child processes, and certain test frameworks don't support it.
+
+---
+
+## Grid density
+
+Control how many grid lines appear on each axis:
+
+```python
+chart = ChartWidget(grid_x=5, grid_y=4)
+
+# Change at runtime:
+chart.setGridDensity(x=10, y=8)
+```
+
+The numbers are targets, not hard counts. `nice_ticks` rounds them to human-readable values, so the actual line count may be off by one. Minimum on either axis is 2.
 
 ---
 
@@ -285,6 +355,8 @@ update_strings({
 | Left drag | Pan |
 | Double-click | Reset view to data bounds |
 | Hover | Crosshair + snap to nearest point/curve + tangent |
+
+Zoom is clamped to a safe range — no matter how far in or out you scroll, the widget will not hang or crash.
 
 ---
 

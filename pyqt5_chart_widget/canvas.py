@@ -2,11 +2,11 @@ from __future__ import annotations
 import math
 import statistics
 from typing import List, Optional, Tuple, TYPE_CHECKING
-from PyQt5.QtWidgets import QWidget, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QSizePolicy, QMenu, QAction, QActionGroup
 from PyQt5.QtCore import Qt, QRect, QPointF
 from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont,
                           QFontMetrics, QPainterPath, QPixmap, QWheelEvent, QMouseEvent)
-from .math_utils import nice_ticks, fmt
+from .math_utils import nice_ticks, fmt, get_fit_modes
 from .items import _LineItem, _ScatterItem, _FitItem, _InfLine
 from .i18n import tr
 if TYPE_CHECKING:
@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 _ML, _MT, _MR, _MB = 58, 14, 20, 40
 _ZOOM_FACTOR = 1.15
+_ZOOM_MIN_SPAN = 1e-10
+_ZOOM_MAX_SPAN = 1e15
 _SNAP_RADIUS_PX = 40
 _TANGENT_HALF_FRAC = 0.18
 _ANALYTICS_PAD = 8
@@ -25,6 +27,10 @@ _LEGEND_PAD = 8
 _LEGEND_SWATCH = 12
 _LATEST_TAG_PAD = 3
 _LATEST_TAG_ROUND = 3
+_COORD_CLAMP = 1e6
+
+_GRID_PRESETS_X = [("chart_widget.ctx_sparse", 120), ("chart_widget.ctx_normal", 80), ("chart_widget.ctx_dense", 50)]
+_GRID_PRESETS_Y = [("chart_widget.ctx_sparse", 100), ("chart_widget.ctx_normal", 60), ("chart_widget.ctx_dense", 40)]
 
 
 class _PlotCanvas(QWidget):
@@ -40,6 +46,7 @@ class _PlotCanvas(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
         self.setMouseTracking(True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
 
     def toggleAnalytics(self):
         self._show_analytics = not self._show_analytics
@@ -49,14 +56,24 @@ class _PlotCanvas(QWidget):
         self._show_latest = not self._show_latest
         self.update()
 
+    def _set_analytics(self, v: bool):
+        self._show_analytics = v
+        self.update()
+
+    def _set_latest(self, v: bool):
+        self._show_latest = v
+        self.update()
+
     def _plot_rect(self) -> QRect:
         ml = _ML + (4 if self._chart.label_left else 0)
         return QRect(ml, _MT, max(1, self.width() - ml - _MR), max(1, self.height() - _MT - _MB))
 
     def _to_pt(self, xv, yv, x0, dx, y0, dy, pr) -> QPointF:
+        px = pr.left() + (xv - x0) / dx * pr.width()
+        py = pr.bottom() - (yv - y0) / dy * pr.height()
         return QPointF(
-            pr.left() + (xv - x0) / dx * pr.width(),
-            pr.bottom() - (yv - y0) / dy * pr.height(),
+            max(-_COORD_CLAMP, min(_COORD_CLAMP, px)),
+            max(-_COORD_CLAMP, min(_COORD_CLAMP, py)),
         )
 
     def _nearest_on_segments(self, mouse: QPointF, xs: List[float], ys: List[float],
@@ -128,6 +145,69 @@ class _PlotCanvas(QWidget):
             ddx, ddy = pts[idx + 1][0] - pts[idx - 1][0], pts[idx + 1][1] - pts[idx - 1][1]
         return ddy / ddx if abs(ddx) > 1e-15 else None
 
+    def contextMenuEvent(self, ev):
+        c = self._chart
+        menu = QMenu(self)
+        act_autofit = QAction(tr("chart_widget.btn_autofit_toggle"), menu)
+        act_autofit.setCheckable(True)
+        act_autofit.setChecked(c._autofit_enabled)
+        act_autofit.triggered.connect(c.setAutofitEnabled)
+        menu.addAction(act_autofit)
+        act_latest = QAction(tr("chart_widget.btn_latest"), menu)
+        act_latest.setCheckable(True)
+        act_latest.setChecked(self._show_latest)
+        act_latest.triggered.connect(self._set_latest)
+        menu.addAction(act_latest)
+        act_analytics = QAction(tr("chart_widget.btn_analytics"), menu)
+        act_analytics.setCheckable(True)
+        act_analytics.setChecked(self._show_analytics)
+        act_analytics.triggered.connect(self._set_analytics)
+        menu.addAction(act_analytics)
+        act_legend = QAction(tr("chart_widget.ctx_legend"), menu)
+        act_legend.setCheckable(True)
+        act_legend.setChecked(c.show_legend)
+        act_legend.triggered.connect(c.setLegendVisible)
+        menu.addAction(act_legend)
+        menu.addSeparator()
+        fit_menu = menu.addMenu(tr("chart_widget.ctx_approximation"))
+        grp = QActionGroup(fit_menu)
+        grp.setExclusive(True)
+        for mode in get_fit_modes():
+            act = QAction(mode.label, fit_menu)
+            act.setCheckable(True)
+            act.setChecked(c._active_fit_key == mode.key)
+            act.triggered.connect(lambda checked, k=mode.key: c._on_fit_mode_selected(k))
+            fit_menu.addAction(act)
+            grp.addAction(act)
+        menu.addSeparator()
+        grid_menu = menu.addMenu(tr("chart_widget.ctx_grid"))
+        x_menu = grid_menu.addMenu(tr("chart_widget.ctx_grid_x"))
+        grp_x = QActionGroup(x_menu)
+        grp_x.setExclusive(True)
+        for key, px in _GRID_PRESETS_X:
+            act = QAction(tr(key), x_menu)
+            act.setCheckable(True)
+            act.setChecked(c.grid_px_x == px)
+            act.triggered.connect(lambda checked, v=px: c.setGridDensity(v, c.grid_px_y))
+            x_menu.addAction(act)
+            grp_x.addAction(act)
+        y_menu = grid_menu.addMenu(tr("chart_widget.ctx_grid_y"))
+        grp_y = QActionGroup(y_menu)
+        grp_y.setExclusive(True)
+        for key, px in _GRID_PRESETS_Y:
+            act = QAction(tr(key), y_menu)
+            act.setCheckable(True)
+            act.setChecked(c.grid_px_y == px)
+            act.triggered.connect(lambda checked, v=px: c.setGridDensity(c.grid_px_x, v))
+            y_menu.addAction(act)
+            grp_y.addAction(act)
+        menu.addSeparator()
+        menu.addAction(tr("chart_widget.ctx_export_csv"), c.exportCsv)
+        menu.addAction(tr("chart_widget.ctx_export_img"), c.exportImage)
+        menu.addSeparator()
+        menu.addAction(tr("chart_widget.ctx_reset_view"), c.autofit)
+        menu.exec_(ev.globalPos())
+
     def wheelEvent(self, ev: QWheelEvent):
         pr = self._plot_rect()
         if not pr.contains(ev.pos()):
@@ -136,10 +216,16 @@ class _PlotCanvas(QWidget):
         cx = c.vx0 + (ev.pos().x() - pr.left()) / pr.width() * (c.vx1 - c.vx0)
         cy = c.vy0 + (pr.bottom() - ev.pos().y()) / pr.height() * (c.vy1 - c.vy0)
         factor = 1.0 / _ZOOM_FACTOR if ev.angleDelta().y() > 0 else _ZOOM_FACTOR
-        c._vx0 = cx + (c.vx0 - cx) * factor
-        c._vx1 = cx + (c.vx1 - cx) * factor
-        c._vy0 = cy + (c.vy0 - cy) * factor
-        c._vy1 = cy + (c.vy1 - cy) * factor
+        nvx0 = cx + (c.vx0 - cx) * factor
+        nvx1 = cx + (c.vx1 - cx) * factor
+        nvy0 = cy + (c.vy0 - cy) * factor
+        nvy1 = cy + (c.vy1 - cy) * factor
+        sx = abs(nvx1 - nvx0)
+        sy = abs(nvy1 - nvy0)
+        if math.isfinite(sx) and _ZOOM_MIN_SPAN <= sx <= _ZOOM_MAX_SPAN:
+            c._vx0, c._vx1 = nvx0, nvx1
+        if math.isfinite(sy) and _ZOOM_MIN_SPAN <= sy <= _ZOOM_MAX_SPAN:
+            c._vy0, c._vy1 = nvy0, nvy1
         self.update()
         ev.accept()
 
@@ -191,12 +277,18 @@ class _PlotCanvas(QWidget):
         pr = self._plot_rect()
         x0, x1 = c.vx0, c.vx1
         y0, y1 = c.vy0, c.vy1
-        dx = x1 - x0 or 1.0
-        dy = y1 - y0 or 1.0
+        dx = x1 - x0
+        dy = y1 - y0
+        if not math.isfinite(dx) or abs(dx) < 1e-300:
+            dx = 1.0
+        if not math.isfinite(dy) or abs(dy) < 1e-300:
+            dy = 1.0
         fm = QFontMetrics(c.font)
         p.setFont(c.font)
-        xt = nice_ticks(x0, x1)
-        yt = nice_ticks(y0, y1)
+        n_x = max(2, pr.width() // max(1, c.grid_px_x))
+        n_y = max(2, pr.height() // max(1, c.grid_px_y))
+        xt = nice_ticks(x0, x1, n_x)
+        yt = nice_ticks(y0, y1, n_y)
         p.setPen(QPen(gr_col, 1, Qt.PenStyle.DotLine))
         for tv in xt:
             sx = int(pr.left() + (tv - x0) / dx * pr.width())

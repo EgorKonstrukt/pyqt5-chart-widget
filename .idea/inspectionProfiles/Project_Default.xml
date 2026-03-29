@@ -1,0 +1,54 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="false" level="WARNING" enabled_by_default="false">
+      <option name="ignoredPackages">
+        <list>
+          <option value="babel" />
+          <option value="contourpy" />
+          <option value="cycler" />
+          <option value="dill" />
+          <option value="docopt" />
+          <option value="fonttools" />
+          <option value="git-filter-repo" />
+          <option value="i18n" />
+          <option value="kiwisolver" />
+          <option value="llvmlite" />
+          <option value="markdown-it-py" />
+          <option value="matplotlib" />
+          <option value="mdurl" />
+          <option value="MouseInfo" />
+          <option value="Nuitka" />
+          <option value="numba" />
+          <option value="opencv-python" />
+          <option value="pipreqs" />
+          <option value="psutil" />
+          <option value="py" />
+          <option value="PyAutoGUI" />
+          <option value="pyfluidsynth" />
+          <option value="pygame" />
+          <option value="pygame-ce" />
+          <option value="pygame_gui" />
+          <option value="PyGetWindow" />
+          <option value="Pygments" />
+          <option value="PyMsgBox" />
+          <option value="pymunk" />
+          <option value="pynput" />
+          <option value="pyparsing" />
+          <option value="pyperclip" />
+          <option value="PyRect" />
+          <option value="PyScreeze" />
+          <option value="python-dateutil" />
+          <option value="python-i18n" />
+          <option value="pytweening" />
+          <option value="pywin32" />
+          <option value="rich" />
+          <option value="six" />
+          <option value="taichi" />
+          <option value="typing-inspection" />
+          <option value="yarg" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

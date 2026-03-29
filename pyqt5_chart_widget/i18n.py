@@ -33,6 +33,17 @@ _STRINGS: Dict[str, str] = {
     "chart_widget.analytics_mean":          "mean y",
     "chart_widget.analytics_std":           "std y",
     "chart_widget.legend_label":            "Series {n}",
+    "chart_widget.ctx_legend":              "Legend",
+    "chart_widget.ctx_approximation":       "Approximation",
+    "chart_widget.ctx_grid":               "Grid",
+    "chart_widget.ctx_grid_x":             "X spacing",
+    "chart_widget.ctx_grid_y":             "Y spacing",
+    "chart_widget.ctx_sparse":             "Sparse",
+    "chart_widget.ctx_normal":             "Normal",
+    "chart_widget.ctx_dense":              "Dense",
+    "chart_widget.ctx_export_csv":         "Export CSV",
+    "chart_widget.ctx_export_img":         "Export Image",
+    "chart_widget.ctx_reset_view":         "Reset view",
 }
 
 _custom_tr: Optional[Callable[[str], str]] = None

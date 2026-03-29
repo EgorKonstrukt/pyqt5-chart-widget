@@ -23,7 +23,9 @@ class ChartWidget(QWidget):
                  font: Optional[QFont] = None,
                  anim_duration: int = 150,
                  anim_easing: QEasingCurve.Type = QEasingCurve.Type.OutQuint,
-                 threaded_fit: bool = False):
+                 threaded_fit: bool = False,
+                 grid_px_x: int = 80,
+                 grid_px_y: int = 60):
         super().__init__(parent)
         self._lines: List[_LineItem] = []
         self._scatters: List[_ScatterItem] = []
@@ -38,6 +40,8 @@ class ChartWidget(QWidget):
         self._active_fit_key: Optional[str] = None
         self._autofit_enabled = True
         self._threaded_fit = threaded_fit
+        self._grid_px_x = max(20, grid_px_x)
+        self._grid_px_y = max(20, grid_px_y)
         self._canvas = _PlotCanvas(self)
         self._toolbar_layout = self._build_toolbar()
         self._toolbar_widget = QWidget(self)
@@ -186,6 +190,11 @@ class ChartWidget(QWidget):
 
     def setThreadedFit(self, threaded: bool):
         self._threaded_fit = threaded
+
+    def setGridDensity(self, px_x: int, px_y: int):
+        self._grid_px_x = max(20, px_x)
+        self._grid_px_y = max(20, px_y)
+        self._canvas.update()
 
     def plot(self, color: Optional[str] = None, width: int = 2,
              label: str = "", dashed: bool = False) -> _LineItem:
@@ -367,3 +376,7 @@ class ChartWidget(QWidget):
     def label_left(self): return self._label_left
     @property
     def label_bottom(self): return self._label_bottom
+    @property
+    def grid_px_x(self): return self._grid_px_x
+    @property
+    def grid_px_y(self): return self._grid_px_y

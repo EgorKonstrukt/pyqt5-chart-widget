@@ -27,7 +27,7 @@ class DemoWindow(QMainWindow):
         self._scatter_x = []
         self._scatter_y = []
 
-        self.chart = ChartWidget(show_toolbar=True, show_legend=True, show_sidebar=True)
+        self.chart = ChartWidget(show_toolbar=True, show_legend=True, show_sidebar=True, threaded_fit=True)
         self.chart.setLabel("left", "Flow, g/min")
         self.chart.setLabel("bottom", "Time, s")
         self.chart.autofit()
@@ -62,7 +62,7 @@ class DemoWindow(QMainWindow):
         if self.timer.isActive():
             self.timer.stop()
         else:
-            self.timer.start(50)
+            self.timer.start(30)
 
     def _clear_data(self):
         self._tick = 0
