@@ -4,6 +4,9 @@ Zero dependencies beyond PyQt5. Drop the package in, plot your data. No matplotl
 
 Originally built for an industrial powder feeder control application where a calibration curve needed to render fast, look clean, and not require importing half of scipy.
 
+<img width="992" height="600" alt="image" src="https://github.com/user-attachments/assets/d67f89c2-edb5-478a-a796-4b11fb4bb92f" />
+
+
 ## Install
 
 ```bash
