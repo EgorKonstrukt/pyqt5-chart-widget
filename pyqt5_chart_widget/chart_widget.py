@@ -1,5 +1,6 @@
 from __future__ import annotations
 import csv
+import time
 from typing import List, Optional, Tuple, Union
 from PyQt5.QtWidgets import (QWidget, QSizePolicy, QFileDialog, QToolButton,
                               QHBoxLayout, QVBoxLayout, QStyle, QMenu, QAction)
@@ -13,6 +14,9 @@ from .math_utils import get_fit_modes, get_fit_mode
 from .palette import next_line_color, next_scatter_color
 
 _AnyItem = Union[_LineItem, _ScatterItem]
+_AUTOFIT_DEBOUNCE_MS = 30
+_ANIM_FRAME_MS = 16
+_RAPID_THRESHOLD_S = 0.25
 
 
 class ChartWidget(QWidget):
@@ -42,6 +46,9 @@ class ChartWidget(QWidget):
         self._threaded_fit = threaded_fit
         self._grid_px_x = max(20, grid_px_x)
         self._grid_px_y = max(20, grid_px_y)
+        self._bounds_dirty = True
+        self._bounds_cache: Tuple[float, float, float, float] = (0.0, 1.0, 0.0, 1.0)
+        self._last_autofit_t = 0.0
         self._canvas = _PlotCanvas(self)
         self._toolbar_layout = self._build_toolbar()
         self._toolbar_widget = QWidget(self)
@@ -52,9 +59,12 @@ class ChartWidget(QWidget):
         self._anim_timer.timeout.connect(self._step_animation)
         self._anim_dur = anim_duration
         self._anim_easing = QEasingCurve(anim_easing)
-        self._anim_start = None
-        self._anim_target = None
+        self._anim_start: Optional[Tuple] = None
+        self._anim_target: Optional[Tuple] = None
         self._anim_elapsed = 0
+        self._autofit_timer = QTimer(self)
+        self._autofit_timer.setSingleShot(True)
+        self._autofit_timer.timeout.connect(self._deferred_autofit)
         content = QHBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
         content.setSpacing(0)
@@ -245,6 +255,7 @@ class ChartWidget(QWidget):
         for lst in (self._lines, self._scatters, self._fits, self._inflines):
             if item in lst:
                 lst.remove(item)
+        self._bounds_dirty = True
         self._canvas.update()
 
     def clearAll(self):
@@ -252,6 +263,7 @@ class ChartWidget(QWidget):
         self._scatters.clear()
         self._fits.clear()
         self._inflines.clear()
+        self._bounds_dirty = True
         self._canvas.update()
 
     def _all_xy(self) -> Tuple[List[float], List[float]]:
@@ -265,34 +277,58 @@ class ChartWidget(QWidget):
         return xs, ys
 
     def _data_bounds(self) -> Tuple[float, float, float, float]:
+        if not self._bounds_dirty:
+            return self._bounds_cache
         xs, ys = self._all_xy()
         if not xs or not ys:
-            return 0.0, 1.0, 0.0, 1.0
+            self._bounds_cache = (0.0, 1.0, 0.0, 1.0)
+            self._bounds_dirty = False
+            return self._bounds_cache
         x0, x1 = min(xs), max(xs)
         y0, y1 = min(ys), max(ys)
         if x0 == x1: x0 -= 1.0; x1 += 1.0
         if y0 == y1: y0 -= 1.0; y1 += 1.0
         px = (x1 - x0) * 0.05
         py = (y1 - y0) * 0.08
-        return x0 - px, x1 + px, y0 - py, y1 + py
+        self._bounds_cache = (x0 - px, x1 + px, y0 - py, y1 + py)
+        self._bounds_dirty = False
+        return self._bounds_cache
 
     def _schedule_autofit(self):
+        self._bounds_dirty = True
         if self._autofit_enabled:
-            self.autofit()
+            self._autofit_timer.start(_AUTOFIT_DEBOUNCE_MS)
+
+    def _deferred_autofit(self):
+        if self._autofit_enabled:
+            self._run_autofit(animated=False)
 
     def autofit(self):
+        self._autofit_timer.stop()
+        self._bounds_dirty = True
+        self._run_autofit(animated=True)
+
+    def _run_autofit(self, animated: bool = True):
         tgt = self._data_bounds()
+        now = time.monotonic()
+        rapid = (now - self._last_autofit_t) < _RAPID_THRESHOLD_S
+        self._last_autofit_t = now
+        if not animated or rapid:
+            self._anim_timer.stop()
+            self._vx0, self._vx1, self._vy0, self._vy1 = tgt
+            self._canvas.update()
+            return
         self._anim_start = (self._vx0, self._vx1, self._vy0, self._vy1)
         self._anim_target = tgt
         self._anim_elapsed = 0
         if self._anim_start != self._anim_target:
-            self._anim_timer.start(16)
+            self._anim_timer.start(_ANIM_FRAME_MS)
         else:
             self._vx0, self._vx1, self._vy0, self._vy1 = tgt
             self._canvas.update()
 
     def _step_animation(self):
-        self._anim_elapsed += 16
+        self._anim_elapsed += _ANIM_FRAME_MS
         p = min(1.0, self._anim_elapsed / self._anim_dur)
         f = self._anim_easing.valueForProgress(p)
         bounds = [s + (t - s) * f for s, t in zip(self._anim_start, self._anim_target)]

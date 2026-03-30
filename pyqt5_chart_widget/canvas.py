@@ -390,6 +390,20 @@ class _PlotCanvas(QWidget):
         pad = _LATEST_TAG_PAD
         rnd = _LATEST_TAG_ROUND
         th = fm.height()
+        p.save()
+        p.setClipRect(pr)
+        for xi, yi, color in entries:
+            sx = pr.left() + (xi - x0) / dx * pr.width()
+            sy = pr.bottom() - (yi - y0) / dy * pr.height()
+            line_col = QColor(color)
+            line_col.setAlpha(180)
+            p.setPen(QPen(line_col, 1.5, Qt.PenStyle.DashLine))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            if pr.top() <= sy <= pr.bottom():
+                p.drawLine(int(sx), int(sy), int(sx), pr.bottom())
+            if pr.left() <= sx <= pr.right():
+                p.drawLine(pr.left(), int(sy), int(sx), int(sy))
+        p.restore()
         for xi, yi, color in entries:
             sx = pr.left() + (xi - x0) / dx * pr.width()
             sy = pr.bottom() - (yi - y0) / dy * pr.height()
