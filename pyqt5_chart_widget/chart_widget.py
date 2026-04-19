@@ -33,13 +33,19 @@ class ChartWidget(QWidget):
         super().__init__(parent)
         self._lines: List[_LineItem] = []
         self._scatters: List[_ScatterItem] = []
+        self._lines_r2: List[_LineItem] = []
+        self._scatters_r2: List[_ScatterItem] = []
         self._fits: List[_FitItem] = []
         self._inflines: List[_InfLine] = []
         self._label_left = ""
+        self._label_right = ""
         self._label_bottom = ""
         self._font = font or QFont("Arial", 8)
         self._vx0 = 0.0; self._vx1 = 1.0
         self._vy0 = 0.0; self._vy1 = 1.0
+        self._vy0_r = 0.0; self._vy1_r = 1.0
+        self._log_x = False
+        self._log_y = False
         self._show_legend = show_legend
         self._active_fit_key: Optional[str] = None
         self._autofit_enabled = True
@@ -48,6 +54,7 @@ class ChartWidget(QWidget):
         self._grid_px_y = max(20, grid_px_y)
         self._bounds_dirty = True
         self._bounds_cache: Tuple[float, float, float, float] = (0.0, 1.0, 0.0, 1.0)
+        self._bounds_r2_cache: Tuple[float, float] = (0.0, 1.0)
         self._last_autofit_t = 0.0
         self._canvas = _PlotCanvas(self)
         self._toolbar_layout = self._build_toolbar()
@@ -181,6 +188,7 @@ class ChartWidget(QWidget):
     def setLabel(self, side: str, text: str):
         if side == "left": self._label_left = text
         elif side == "bottom": self._label_bottom = text
+        elif side == "right": self._label_right = text
         self._canvas.update()
 
     def setFont(self, font: QFont):
@@ -206,8 +214,26 @@ class ChartWidget(QWidget):
         self._grid_px_y = max(20, px_y)
         self._canvas.update()
 
+    def setLogScale(self, x: Optional[bool] = None, y: Optional[bool] = None):
+        if x is not None:
+            self._log_x = x
+        if y is not None:
+            self._log_y = y
+        self._canvas.update()
+
+    def setZoomLock(self, lock: str):
+        self._canvas.setZoomLock(lock)
+
+    def setRangeSelection(self, x_lo: float, x_hi: float):
+        self._canvas._range_sel_x = (x_lo, x_hi)
+        self._canvas.update()
+
+    def clearRangeSelection(self):
+        self._canvas.clearRangeSelection()
+
     def plot(self, color: Optional[str] = None, width: int = 2,
-             label: str = "", dashed: bool = False) -> _LineItem:
+             label: str = "", dashed: bool = False,
+             right_axis: bool = False) -> _LineItem:
         c = color or next_line_color()
         pen = QPen(QColor(c), width)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -215,24 +241,32 @@ class ChartWidget(QWidget):
         if dashed:
             pen.setStyle(Qt.PenStyle.DashLine)
         item = _LineItem(self, pen, label)
-        self._lines.append(item)
+        if right_axis:
+            self._lines_r2.append(item)
+        else:
+            self._lines.append(item)
         return item
 
     def addScatter(self, size: int = 10, color: Optional[str] = None,
-                   label: str = "") -> _ScatterItem:
+                   label: str = "", right_axis: bool = False) -> _ScatterItem:
         c = color or next_scatter_color()
         item = _ScatterItem(self, size, QColor(c), label)
-        self._scatters.append(item)
+        if right_axis:
+            self._scatters_r2.append(item)
+        else:
+            self._scatters.append(item)
         return item
 
     def addFit(self, source: _AnyItem, mode_key: Optional[str] = None,
                color: Optional[str] = None, width: int = 2,
-               dashed: bool = True, label: str = "") -> _FitItem:
+               dashed: bool = True, label: str = "",
+               show_formula: bool = False) -> _FitItem:
         key = mode_key or self._active_fit_key or "linear"
         c = color or next_line_color()
         pen = QPen(QColor(c), width,
                    Qt.PenStyle.DashLine if dashed else Qt.PenStyle.SolidLine)
         fit = _FitItem(self, source, key, pen, label)
+        fit.show_formula = show_formula
         self._fits.append(fit)
         if self._active_fit_key is None:
             self._active_fit_key = key
@@ -252,7 +286,8 @@ class ChartWidget(QWidget):
         return ln
 
     def removeItem(self, item):
-        for lst in (self._lines, self._scatters, self._fits, self._inflines):
+        for lst in (self._lines, self._scatters, self._fits, self._inflines,
+                    self._lines_r2, self._scatters_r2):
             if item in lst:
                 lst.remove(item)
         self._bounds_dirty = True
@@ -263,34 +298,47 @@ class ChartWidget(QWidget):
         self._scatters.clear()
         self._fits.clear()
         self._inflines.clear()
+        self._lines_r2.clear()
+        self._scatters_r2.clear()
         self._bounds_dirty = True
         self._canvas.update()
-
-    def _all_xy(self) -> Tuple[List[float], List[float]]:
-        xs: List[float] = []
-        ys: List[float] = []
-        for item in self._lines + self._scatters:
-            xs.extend(item.xs); ys.extend(item.ys)
-        for ln in self._inflines:
-            if ln.visible:
-                (ys if ln.horizontal else xs).append(ln.value)
-        return xs, ys
 
     def _data_bounds(self) -> Tuple[float, float, float, float]:
         if not self._bounds_dirty:
             return self._bounds_cache
-        xs, ys = self._all_xy()
-        if not xs or not ys:
+        items_main = [it for it in self._lines + self._scatters if it.xs]
+        if not items_main:
             self._bounds_cache = (0.0, 1.0, 0.0, 1.0)
-            self._bounds_dirty = False
-            return self._bounds_cache
-        x0, x1 = min(xs), max(xs)
-        y0, y1 = min(ys), max(ys)
-        if x0 == x1: x0 -= 1.0; x1 += 1.0
-        if y0 == y1: y0 -= 1.0; y1 += 1.0
-        px = (x1 - x0) * 0.05
-        py = (y1 - y0) * 0.08
-        self._bounds_cache = (x0 - px, x1 + px, y0 - py, y1 + py)
+        else:
+            x0 = min(min(it.xs) for it in items_main)
+            x1 = max(max(it.xs) for it in items_main)
+            y0 = min(min(it.ys) for it in items_main)
+            y1 = max(max(it.ys) for it in items_main)
+            for ln in self._inflines:
+                if ln.visible:
+                    if ln.horizontal:
+                        y0 = min(y0, ln.value)
+                        y1 = max(y1, ln.value)
+                    else:
+                        x0 = min(x0, ln.value)
+                        x1 = max(x1, ln.value)
+            if x0 == x1:
+                x0 -= 1.0; x1 += 1.0
+            if y0 == y1:
+                y0 -= 1.0; y1 += 1.0
+            px = (x1 - x0) * 0.05
+            py = (y1 - y0) * 0.08
+            self._bounds_cache = (x0 - px, x1 + px, y0 - py, y1 + py)
+        items_r2 = [it for it in self._lines_r2 + self._scatters_r2 if it.xs]
+        if items_r2:
+            y0r = min(min(it.ys) for it in items_r2)
+            y1r = max(max(it.ys) for it in items_r2)
+            if y0r == y1r:
+                y0r -= 1.0; y1r += 1.0
+            py = (y1r - y0r) * 0.08
+            self._bounds_r2_cache = (y0r - py, y1r + py)
+        else:
+            self._bounds_r2_cache = (0.0, 1.0)
         self._bounds_dirty = False
         return self._bounds_cache
 
@@ -310,6 +358,7 @@ class ChartWidget(QWidget):
 
     def _run_autofit(self, animated: bool = True):
         tgt = self._data_bounds()
+        self._vy0_r, self._vy1_r = self._bounds_r2_cache
         now = time.monotonic()
         rapid = (now - self._last_autofit_t) < _RAPID_THRESHOLD_S
         self._last_autofit_t = now
@@ -356,11 +405,11 @@ class ChartWidget(QWidget):
         if not path:
             return
         series = []
-        for i, it in enumerate(self._lines):
+        for i, it in enumerate(self._lines + self._lines_r2):
             if it.xs:
                 n = it.label or f"line{i}"
                 series.append((f"{n}_x", f"{n}_y", it.xs, it.ys))
-        for i, it in enumerate(self._scatters):
+        for i, it in enumerate(self._scatters + self._scatters_r2):
             if it.xs:
                 n = it.label or f"scatter{i}"
                 series.append((f"{n}_x", f"{n}_y", it.xs, it.ys))
@@ -397,19 +446,33 @@ class ChartWidget(QWidget):
     @property
     def vy1(self): return self._vy1
     @property
+    def vy0_r(self): return self._vy0_r
+    @property
+    def vy1_r(self): return self._vy1_r
+    @property
+    def log_x(self): return self._log_x
+    @property
+    def log_y(self): return self._log_y
+    @property
     def font(self): return self._font
     @property
     def fits(self): return self._fits
     @property
     def lines(self): return self._lines
     @property
+    def lines_r2(self): return self._lines_r2
+    @property
     def scatters(self): return self._scatters
+    @property
+    def scatters_r2(self): return self._scatters_r2
     @property
     def inflines(self): return self._inflines
     @property
     def show_legend(self): return self._show_legend
     @property
     def label_left(self): return self._label_left
+    @property
+    def label_right(self): return self._label_right
     @property
     def label_bottom(self): return self._label_bottom
     @property

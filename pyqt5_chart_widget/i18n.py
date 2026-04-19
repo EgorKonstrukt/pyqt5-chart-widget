@@ -32,6 +32,7 @@ _STRINGS: Dict[str, str] = {
     "chart_widget.analytics_ymax":          "y max",
     "chart_widget.analytics_mean":          "mean y",
     "chart_widget.analytics_std":           "std y",
+    "chart_widget.analytics_integral":      "integral",
     "chart_widget.legend_label":            "Series {n}",
     "chart_widget.ctx_legend":              "Legend",
     "chart_widget.ctx_approximation":       "Approximation",
@@ -44,6 +45,10 @@ _STRINGS: Dict[str, str] = {
     "chart_widget.ctx_export_csv":         "Export CSV",
     "chart_widget.ctx_export_img":         "Export Image",
     "chart_widget.ctx_reset_view":         "Reset view",
+    "chart_widget.ctx_log_scale":          "Log scale",
+    "chart_widget.ctx_zoom_lock":          "Zoom axis lock",
+    "chart_widget.ctx_zoom_both":          "Both axes",
+    "chart_widget.ctx_clear_range":        "Clear range selection",
 }
 
 _custom_tr: Optional[Callable[[str], str]] = None

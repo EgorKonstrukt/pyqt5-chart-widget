@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Tuple, Union, TYPE_CHECKING
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, QObject
 from PyQt5.QtGui import QColor, QPen
 if TYPE_CHECKING:
     from .chart_widget import ChartWidget
@@ -13,12 +13,15 @@ class _InfLine:
         self.value = value
         self.pen = pen
         self.visible = False
+        self.draggable = True
     def setValue(self, v: float):
         self.value = v
         self._chart.update()
     def setVisible(self, v: bool):
         self.visible = v
         self._chart.update()
+    def setDraggable(self, v: bool):
+        self.draggable = v
 
 
 class _LineItem:
@@ -30,6 +33,9 @@ class _LineItem:
         self.label = label
         self.visible = True
         self.raw_visible = True
+        self.fill_under = False
+        self.fill_alpha = 40
+        self.step_mode = False
     def setData(self, xs=None, ys=None):
         self.xs = list(xs) if xs is not None else []
         self.ys = list(ys) if ys is not None else []
@@ -43,10 +49,20 @@ class _LineItem:
     def setLabel(self, label: str):
         self.label = label
         self._chart.update()
+    def setFillUnder(self, enabled: bool, alpha: int = 40):
+        self.fill_under = enabled
+        self.fill_alpha = alpha
+        self._chart.update()
+    def setStepMode(self, enabled: bool):
+        self.step_mode = enabled
+        self._chart.update()
 
 
-class _ScatterItem:
+class _ScatterItem(QObject):
+    point_clicked = pyqtSignal(float, float, int)
+
     def __init__(self, chart: "ChartWidget", size: int, color: QColor, label: str = ""):
+        super().__init__()
         self._chart = chart
         self.xs: List[float] = []
         self.ys: List[float] = []
@@ -55,9 +71,14 @@ class _ScatterItem:
         self.label = label
         self.visible = True
         self.raw_visible = True
+        self.error_xs: Optional[List[float]] = None
+        self.error_ys: Optional[List[float]] = None
+        self.annotations: Optional[List[str]] = None
+        self.selected_idx: Optional[int] = None
     def setData(self, x=None, y=None, **_):
         self.xs = list(x) if x is not None else []
         self.ys = list(y) if y is not None else []
+        self.selected_idx = None
         self._chart._schedule_autofit()
     def setVisible(self, v: bool):
         self.visible = v
@@ -67,6 +88,17 @@ class _ScatterItem:
         self._chart.update()
     def setLabel(self, label: str):
         self.label = label
+        self._chart.update()
+    def setErrorBars(self, error_x: Optional[List[float]] = None,
+                     error_y: Optional[List[float]] = None):
+        self.error_xs = list(error_x) if error_x is not None else None
+        self.error_ys = list(error_y) if error_y is not None else None
+        self._chart.update()
+    def setAnnotations(self, labels: Optional[List[str]]):
+        self.annotations = list(labels) if labels is not None else None
+        self._chart.update()
+    def selectPoint(self, idx: Optional[int]):
+        self.selected_idx = idx
         self._chart.update()
 
 
@@ -101,6 +133,7 @@ class _FitItem:
         self.pen = pen
         self.label = label
         self.visible = True
+        self.show_formula = False
         self._xs: List[float] = []
         self._ys: List[float] = []
         self._worker: Optional[_FitWorker] = None
@@ -164,6 +197,12 @@ class _FitItem:
             return None if scalar else [None] * len(x_list)
         result = mode.fn(xs_s, ys_s, x_list)
         return result[0] if scalar else result
+    def getFormula(self) -> str:
+        from .math_utils import get_fit_mode
+        mode = get_fit_mode(self.mode_key)
+        if mode is None or not self.source.xs:
+            return ""
+        return mode.formula(list(self.source.xs), list(self.source.ys))
     def asDict(self, x_lo: Optional[float] = None, x_hi: Optional[float] = None,
                n_pts: int = 400) -> dict:
         xs, ys = self.getData(x_lo, x_hi, n_pts)
@@ -180,6 +219,9 @@ class _FitItem:
         self._chart.update()
     def setLabel(self, label: str):
         self.label = label
+        self._chart.update()
+    def setShowFormula(self, v: bool):
+        self.show_formula = v
         self._chart.update()
     @property
     def xs(self) -> List[float]:

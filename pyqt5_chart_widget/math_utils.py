@@ -140,17 +140,30 @@ FitFn = Callable[[List[float], List[float], List[float]], List[float]]
 
 
 class FitMode:
-    def __init__(self, key: str, label: str, fn: FitFn, min_points: int = 2):
+    def __init__(self, key: str, label: str, fn: FitFn, min_points: int = 2,
+                 formula_fn: Optional[Callable[[List[float], List[float]], str]] = None):
         self.key = key
         self.label = label
         self.fn = fn
         self.min_points = min_points
+        self.formula_fn = formula_fn
 
     def evaluate(self, x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> Optional[List[float]]:
         x_pts, y_pts = _sort_unique(x_pts, y_pts)
         if len(x_pts) < self.min_points:
             return None
         return self.fn(x_pts, y_pts, x_eval)
+
+    def formula(self, x_pts: List[float], y_pts: List[float]) -> str:
+        if self.formula_fn is None:
+            return ""
+        x_pts, y_pts = _sort_unique(x_pts, y_pts)
+        if len(x_pts) < self.min_points:
+            return ""
+        try:
+            return self.formula_fn(x_pts, y_pts)
+        except Exception:
+            return ""
 
 
 def _fit_linear_origin(x_pts, y_pts, x_eval):
@@ -159,12 +172,29 @@ def _fit_linear_origin(x_pts, y_pts, x_eval):
     return [k * xi for xi in x_eval]
 
 
+def _formula_linear_origin(x_pts, y_pts):
+    denom = sum(xi * xi for xi in x_pts)
+    k = sum(xi * yi for xi, yi in zip(x_pts, y_pts)) / denom if denom else 0.0
+    return f"y = {fmt(k)}·x"
+
+
 def _fit_linear(x_pts, y_pts, x_eval):
     x_min = x_pts[0]
     x_range = float(x_pts[-1] - x_min) or 1.0
     xn = [(xi - x_min) / x_range for xi in x_pts]
     c = _polyfit(xn, y_pts, 1)
     return [_polyval(c, (xi - x_min) / x_range) for xi in x_eval]
+
+
+def _formula_linear(x_pts, y_pts):
+    x_min = x_pts[0]
+    x_range = float(x_pts[-1] - x_min) or 1.0
+    xn = [(xi - x_min) / x_range for xi in x_pts]
+    c = _polyfit(xn, y_pts, 1)
+    a_real = c[0] / x_range
+    b_real = c[1] - c[0] * x_min / x_range
+    sign = "+" if b_real >= 0 else "-"
+    return f"y = {fmt(a_real)}·x {sign} {fmt(abs(b_real))}"
 
 
 def _make_poly_fit(deg: int) -> FitFn:
@@ -178,6 +208,28 @@ def _make_poly_fit(deg: int) -> FitFn:
     return _fit
 
 
+def _make_poly_formula(deg: int):
+    def _formula(x_pts, y_pts):
+        actual_deg = min(deg, len(x_pts) - 1)
+        x_min = x_pts[0]
+        x_range = float(x_pts[-1] - x_min) or 1.0
+        xn = [(xi - x_min) / x_range for xi in x_pts]
+        c = _polyfit(xn, y_pts, actual_deg)
+        parts = []
+        for i, coef in enumerate(c):
+            power = actual_deg - i
+            if abs(coef) < 1e-10:
+                continue
+            if power == 0:
+                parts.append(fmt(coef))
+            elif power == 1:
+                parts.append(f"{fmt(coef)}·x")
+            else:
+                parts.append(f"{fmt(coef)}·x^{power}")
+        return "y = " + (" + ".join(parts) if parts else "0")
+    return _formula
+
+
 def _fit_pchip(x_pts, y_pts, x_eval):
     return _pchip_eval(x_pts, y_pts, x_eval)
 
@@ -188,12 +240,31 @@ def _fit_cubic_spline(x_pts, y_pts, x_eval):
     return _cubic_spline_eval(x_pts, y_pts, x_eval)
 
 
+def trapezoid_integral(xs: List[float], ys: List[float],
+                       x_lo: Optional[float] = None, x_hi: Optional[float] = None) -> float:
+    if len(xs) < 2:
+        return 0.0
+    pairs = sorted(zip(xs, ys), key=lambda p: p[0])
+    if x_lo is not None:
+        pairs = [(x, y) for x, y in pairs if x >= x_lo]
+    if x_hi is not None:
+        pairs = [(x, y) for x, y in pairs if x <= x_hi]
+    if len(pairs) < 2:
+        return 0.0
+    total = 0.0
+    for i in range(len(pairs) - 1):
+        x0, y0 = pairs[i]
+        x1, y1 = pairs[i + 1]
+        total += (x1 - x0) * (y0 + y1) / 2.0
+    return total
+
+
 _BUILTIN_MODES: List[FitMode] = [
-    FitMode("linear_origin", "Linear (origin)", _fit_linear_origin, 1),
-    FitMode("linear",        "Linear",           _fit_linear,         2),
-    FitMode("poly2",         "Polynomial 2°",    _make_poly_fit(2),   2),
-    FitMode("poly3",         "Polynomial 3°",    _make_poly_fit(3),   2),
-    FitMode("poly4",         "Polynomial 4°",    _make_poly_fit(4),   2),
+    FitMode("linear_origin", "Linear (origin)", _fit_linear_origin, 1, _formula_linear_origin),
+    FitMode("linear",        "Linear",           _fit_linear,         2, _formula_linear),
+    FitMode("poly2",         "Polynomial 2°",    _make_poly_fit(2),   2, _make_poly_formula(2)),
+    FitMode("poly3",         "Polynomial 3°",    _make_poly_fit(3),   2, _make_poly_formula(3)),
+    FitMode("poly4",         "Polynomial 4°",    _make_poly_fit(4),   2, _make_poly_formula(4)),
     FitMode("pchip",         "PCHIP",            _fit_pchip,          2),
     FitMode("spline",        "Cubic Spline",      _fit_cubic_spline,   2),
 ]
@@ -247,6 +318,34 @@ def nice_ticks(lo: float, hi: float, n: int = 7) -> List[float]:
             break
         v = nv
     return ticks
+
+
+def nice_log_ticks(lo: float, hi: float) -> List[float]:
+    if lo <= 0 or hi <= 0 or lo >= hi:
+        return []
+    lo_e = math.floor(math.log10(lo))
+    hi_e = math.ceil(math.log10(hi))
+    ticks = []
+    for e in range(int(lo_e), int(hi_e) + 1):
+        for m in (1, 2, 5):
+            v = m * 10.0 ** e
+            if lo <= v <= hi:
+                ticks.append(v)
+    return ticks if ticks else [lo, hi]
+
+
+def to_log(v: float) -> float:
+    return math.log10(v) if v > 0 else float('-inf')
+
+
+def decimated(xs: List[float], ys: List[float], max_pts: int) -> Tuple[List[float], List[float]]:
+    n = len(xs)
+    if n <= max_pts:
+        return xs, ys
+    step = n / max_pts
+    indices = [int(i * step) for i in range(max_pts)]
+    indices[-1] = n - 1
+    return [xs[i] for i in indices], [ys[i] for i in indices]
 
 
 def fmt(v: float) -> str:
