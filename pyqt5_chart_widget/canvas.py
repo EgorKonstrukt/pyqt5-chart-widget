@@ -14,6 +14,14 @@ from .i18n import tr
 if TYPE_CHECKING:
     from .chart_widget import ChartWidget
 
+try:
+    from ._cy_utils import nearest_on_segments_cy as _cy_nearest, decimated_to_screen_cy as _cy_dec_screen
+    _CY = True
+    # print(_CY)
+except ImportError:
+    _CY = False
+    # print(_CY)
+
 _ML, _MT, _MR, _MB = 58, 14, 20, 40
 _MR2 = 52
 _ZOOM_FACTOR = 1.15
@@ -151,6 +159,7 @@ class _PlotCanvas(QWidget):
         log_x, log_y = c.log_x, c.log_y
         best_d = float("inf")
         best = None
+        pl, pb, pw, ph = float(pr.left()), float(pr.bottom()), float(pr.width()), float(pr.height())
         for item in c.scatters:
             if not item.visible:
                 continue
@@ -164,14 +173,20 @@ class _PlotCanvas(QWidget):
             if not item.visible or not item.xs:
                 continue
             dxs, dys = decimated(item.xs, item.ys, _DECIMATE_THRESHOLD)
-            r = self._nearest_on_segments(mouse, dxs, dys, pr, x0, dx, y0, dy, log_x, log_y)
+            if _CY:
+                r = _cy_nearest(mouse.x(), mouse.y(), dxs, dys, x0, dx, y0, dy, pl, pb, pw, ph, log_x, log_y)
+            else:
+                r = self._nearest_on_segments(mouse, dxs, dys, pr, x0, dx, y0, dy, log_x, log_y)
             if r and r[2] < best_d:
                 best_d = r[2]
                 best = (r[0], r[1], r[2], item)
         for item in c.fits:
             if not item.visible or not item.xs:
                 continue
-            r = self._nearest_on_segments(mouse, item.xs, item.ys, pr, x0, dx, y0, dy, log_x, log_y)
+            if _CY:
+                r = _cy_nearest(mouse.x(), mouse.y(), item.xs, item.ys, x0, dx, y0, dy, pl, pb, pw, ph, log_x, log_y)
+            else:
+                r = self._nearest_on_segments(mouse, item.xs, item.ys, pr, x0, dx, y0, dy, log_x, log_y)
             if r and r[2] < best_d:
                 best_d = r[2]
                 best = (r[0], r[1], r[2], item)
@@ -630,46 +645,84 @@ class _PlotCanvas(QWidget):
             fit._recompute(x_lo, x_hi, threaded=c._threaded_fit)
             if len(fit.xs) < 2:
                 continue
-            pts = [self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, log_x, log_y)
-                   for xi, yi in zip(fit.xs, fit.ys)]
-            path = QPainterPath()
-            path.moveTo(pts[0])
-            for pt in pts[1:]:
-                path.lineTo(pt)
+            if _CY:
+                flat, out_n = _cy_dec_screen(
+                    fit.xs, fit.ys, len(fit.xs),
+                    x0, dx, y0, dy,
+                    float(pr.left()), float(pr.bottom()), float(pr.width()), float(pr.height()),
+                    log_x, log_y,
+                )
+                path = QPainterPath()
+                path.moveTo(flat[0], flat[1])
+                for i in range(1, out_n):
+                    path.lineTo(flat[i * 2], flat[i * 2 + 1])
+                mid_flat_x = flat[(out_n // 2) * 2]
+                mid_flat_y = flat[(out_n // 2) * 2 + 1]
+            else:
+                pts = [self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, log_x, log_y)
+                       for xi, yi in zip(fit.xs, fit.ys)]
+                path = QPainterPath()
+                path.moveTo(pts[0])
+                for pt in pts[1:]:
+                    path.lineTo(pt)
+                mid_pt = pts[len(pts) // 2]
+                mid_flat_x, mid_flat_y = mid_pt.x(), mid_pt.y()
             p.setPen(fit.pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
             if fit.show_formula:
                 formula = fit.getFormula()
                 if formula:
-                    mid_idx = len(pts) // 2
-                    mid_pt = pts[mid_idx]
-                    self._draw_formula_tag(p, mid_pt, formula, fg, bg, fm)
+                    self._draw_formula_tag(p, QPointF(mid_flat_x, mid_flat_y), formula, fg, bg, fm)
         for item in c.lines:
             if not item.visible or not item.raw_visible or len(item.xs) < 2:
                 continue
-            dxs, dys = decimated(item.xs, item.ys, _DECIMATE_THRESHOLD)
-            if item.step_mode:
-                pts = self._make_step_pts(dxs, dys, x0, dx, y0, dy, pr, log_x, log_y)
+            if _CY and not item.step_mode:
+                flat, out_n = _cy_dec_screen(
+                    item.xs, item.ys, _DECIMATE_THRESHOLD,
+                    x0, dx, y0, dy,
+                    float(pr.left()), float(pr.bottom()), float(pr.width()), float(pr.height()),
+                    log_x, log_y,
+                )
+                path = QPainterPath()
+                path.moveTo(flat[0], flat[1])
+                for i in range(1, out_n):
+                    path.lineTo(flat[i * 2], flat[i * 2 + 1])
+                if item.fill_under:
+                    fill_path = QPainterPath(path)
+                    baseline_y = pr.bottom() - (0 - y0) / dy * pr.height()
+                    baseline_y = max(float(pr.top()), min(float(pr.bottom()), baseline_y))
+                    fill_path.lineTo(flat[(out_n - 1) * 2], baseline_y)
+                    fill_path.lineTo(flat[0], baseline_y)
+                    fill_path.closeSubpath()
+                    fill_col = QColor(item.pen.color())
+                    fill_col.setAlpha(item.fill_alpha)
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(QBrush(fill_col))
+                    p.drawPath(fill_path)
             else:
-                pts = [self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, log_x, log_y)
-                       for xi, yi in zip(dxs, dys)]
-            path = QPainterPath()
-            path.moveTo(pts[0])
-            for pt in pts[1:]:
-                path.lineTo(pt)
-            if item.fill_under:
-                fill_path = QPainterPath(path)
-                baseline_y = pr.bottom() - (0 - y0) / dy * pr.height()
-                baseline_y = max(pr.top(), min(pr.bottom(), baseline_y))
-                fill_path.lineTo(pts[-1].x(), baseline_y)
-                fill_path.lineTo(pts[0].x(), baseline_y)
-                fill_path.closeSubpath()
-                fill_col = QColor(item.pen.color())
-                fill_col.setAlpha(item.fill_alpha)
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(fill_col))
-                p.drawPath(fill_path)
+                dxs, dys = decimated(item.xs, item.ys, _DECIMATE_THRESHOLD)
+                if item.step_mode:
+                    pts = self._make_step_pts(dxs, dys, x0, dx, y0, dy, pr, log_x, log_y)
+                else:
+                    pts = [self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, log_x, log_y)
+                           for xi, yi in zip(dxs, dys)]
+                path = QPainterPath()
+                path.moveTo(pts[0])
+                for pt in pts[1:]:
+                    path.lineTo(pt)
+                if item.fill_under:
+                    fill_path = QPainterPath(path)
+                    baseline_y = pr.bottom() - (0 - y0) / dy * pr.height()
+                    baseline_y = max(pr.top(), min(pr.bottom(), baseline_y))
+                    fill_path.lineTo(pts[-1].x(), baseline_y)
+                    fill_path.lineTo(pts[0].x(), baseline_y)
+                    fill_path.closeSubpath()
+                    fill_col = QColor(item.pen.color())
+                    fill_col.setAlpha(item.fill_alpha)
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(QBrush(fill_col))
+                    p.drawPath(fill_path)
             p.setPen(item.pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)

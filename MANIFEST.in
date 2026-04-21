@@ -1,0 +1,3 @@
+include pyqt5_chart_widget/_cy_utils.pyx
+include README.md
+include LICENSE

@@ -28,7 +28,7 @@ class LiveTab(QWidget):
     def __init__(self):
         super().__init__()
         self._tick = 0
-        self._buf = 2000
+        self._buf = 200
         self._xs, self._ys1, self._ys2 = [], [], []
         self._sc_x, self._sc_y, self._sc_ey = [], [], []
         self._sc_ann = []
@@ -93,7 +93,7 @@ class LiveTab(QWidget):
 
         self.timer = QTimer()
         self.timer.timeout.connect(self._tick_data)
-        self.timer.start(30)
+        self.timer.start(20)
 
     def _on_point_clicked(self, x, y, idx):
         self._status.setText(f"Peak selected  x={x:.3f}  y={y:.3f}  idx={idx}")
@@ -224,7 +224,7 @@ class BigDataTab(QWidget):
         line_sin = self.chart.plot(label="Multi-sine", color="#e74c3c", width=1)
         line_sin.setData(xs=xs, ys=ys_sin)
 
-        info = QLabel(f"{N:,} points per series · decimated to ~2000 for rendering · scroll to zoom")
+        info = QLabel(f"{N:,} points per series · scroll to zoom")
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info.setStyleSheet("color: #888; font-size: 11px; padding: 4px;")
 

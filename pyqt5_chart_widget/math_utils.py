@@ -3,6 +3,12 @@ import math
 from bisect import bisect_right
 from typing import Callable, Dict, List, Optional, Tuple
 
+try:
+    from ._cy_utils import trapezoid_integral_cy as _ti_cy, polyfit_cy as _pf_cy
+    _CY = True
+except ImportError:
+    _CY = False
+
 _NICE_TICKS_MAX = 64
 
 
@@ -48,6 +54,8 @@ def _gauss_solve(a: List[List[float]], b: List[float]) -> List[float]:
 
 
 def _polyfit(x: List[float], y: List[float], deg: int) -> List[float]:
+    if _CY:
+        return _pf_cy(x, y, deg)
     d = deg + 1
     vt_v = [[0.0] * d for _ in range(d)]
     vt_y = [0.0] * d
@@ -242,6 +250,8 @@ def _fit_cubic_spline(x_pts, y_pts, x_eval):
 
 def trapezoid_integral(xs: List[float], ys: List[float],
                        x_lo: Optional[float] = None, x_hi: Optional[float] = None) -> float:
+    if _CY:
+        return _ti_cy(xs, ys, x_lo, x_hi)
     if len(xs) < 2:
         return 0.0
     pairs = sorted(zip(xs, ys), key=lambda p: p[0])
