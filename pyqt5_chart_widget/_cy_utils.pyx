@@ -135,6 +135,30 @@ cdef void _gauss_ip(double* a, double* b, int nd) noexcept nogil:
             b[row] -= f * b[col]
 
 
+def fn_to_screen_cy(
+    list xs, list ys,
+    double x0, double dx, double y0, double dy,
+    double pl, double pb, double pw, double ph,
+):
+    cdef int n = len(xs)
+    cdef array buf = clone(_DBL_T, n * 2, False)
+    cdef double[:] v = buf
+    cdef double px, py
+    cdef object yi_obj
+    cdef int i
+    for i in range(n):
+        yi_obj = ys[i]
+        if yi_obj is None:
+            v[i * 2] = 1e308
+            v[i * 2 + 1] = 1e308
+        else:
+            px = _cl(pl + ((<double>xs[i] - x0) / dx * pw))
+            py = _cl(pb - ((<double>yi_obj - y0) / dy * ph))
+            v[i * 2] = px
+            v[i * 2 + 1] = py
+    return buf, n
+
+
 def polyfit_cy(list xn, list yn, int deg):
     cdef int d = deg + 1 if deg + 1 <= MAX_D else MAX_D
     cdef int n = len(xn), i, r, c, j

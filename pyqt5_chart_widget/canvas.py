@@ -6,13 +6,19 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 from PyQt5.QtWidgets import QWidget, QSizePolicy, QMenu, QAction, QActionGroup
 from PyQt5.QtCore import Qt, QRect, QRectF, QPointF
 from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont,
-                          QFontMetrics, QPainterPath, QPixmap, QWheelEvent, QMouseEvent)
+                          QFontMetrics, QPainterPath, QPixmap, QWheelEvent, QMouseEvent,
+                          QPolygonF)
 from .math_utils import (nice_ticks, nice_log_ticks, to_log, decimated,
                           fmt, get_fit_modes, trapezoid_integral)
 from .items import _LineItem, _ScatterItem, _FitItem, _InfLine, _FunctionItem, _RulerItem
 from .i18n import tr
 if TYPE_CHECKING:
     from .chart_widget import ChartWidget
+try:
+    import numpy as _np
+    _NP_CANVAS = True
+except ImportError:
+    _NP_CANVAS = False
 
 try:
     from ._cy_utils import nearest_on_segments_cy as _cy_nearest, decimated_to_screen_cy as _cy_dec_screen
@@ -43,9 +49,100 @@ _DECIMATE_THRESHOLD = 2000
 _INFLINE_HIT_PX = 6
 _RUBBERBAND_MIN_PX = 4
 _RANGE_SEL_ALPHA = 30
+_SCREEN_Y_CLAMP = 32768.0
 
 _GRID_PRESETS_X = [("chart_widget.ctx_sparse", 120), ("chart_widget.ctx_normal", 80), ("chart_widget.ctx_dense", 50)]
 _GRID_PRESETS_Y = [("chart_widget.ctx_sparse", 100), ("chart_widget.ctx_normal", 60), ("chart_widget.ctx_dense", 40)]
+
+try:
+    from ._cy_utils import fn_to_screen_cy as _fn_to_screen_cy
+    _CY_FN = True
+except ImportError:
+    _CY_FN = False
+
+_SENTINEL = 1e308
+
+def _build_fn_path_fast(fn_xs, fn_ys,
+                        x0: float, dx: float, y0: float, dy: float,
+                        pr_left: float, pr_bottom: float,
+                        pr_width: float, pr_height: float) -> QPainterPath:
+    path = QPainterPath()
+    n = len(fn_xs)
+    if n < 2:
+        return path
+    if _CY_FN:
+        buf, count = _fn_to_screen_cy(
+            fn_xs, fn_ys, x0, dx, y0, dy,
+            pr_left, pr_bottom, pr_width, pr_height,
+        )
+        seg_start = -1
+        i = 0
+        while i < count:
+            px = buf[i * 2]
+            if px >= _SENTINEL:
+                if seg_start >= 0:
+                    seg_len = i - seg_start
+                    if seg_len >= 2:
+                        pts = [QPointF(buf[(seg_start + k) * 2],
+                                       buf[(seg_start + k) * 2 + 1])
+                               for k in range(seg_len)]
+                        path.addPolygon(QPolygonF(pts))
+                seg_start = -1
+            else:
+                if seg_start < 0:
+                    seg_start = i
+            i += 1
+        if seg_start >= 0:
+            seg_len = count - seg_start
+            if seg_len >= 2:
+                pts = [QPointF(buf[(seg_start + k) * 2],
+                               buf[(seg_start + k) * 2 + 1])
+                       for k in range(seg_len)]
+                path.addPolygon(QPolygonF(pts))
+        return path
+    if _NP_CANVAS:
+        xs_arr = _np.asarray(fn_xs, dtype=_np.float64)
+        none_mask = _np.array([v is None for v in fn_ys], dtype=bool)
+        ys_raw = _np.array([0.0 if v is None else v for v in fn_ys], dtype=_np.float64)
+        px_arr = pr_left + (xs_arr - x0) / dx * pr_width
+        py_arr = pr_bottom - (ys_raw - y0) / dy * pr_height
+        _np.clip(px_arr, -_COORD_CLAMP, _COORD_CLAMP, out=px_arr)
+        _np.clip(py_arr, -_SCREEN_Y_CLAMP, _SCREEN_Y_CLAMP, out=py_arr)
+        seg_start = -1
+        for i in range(n):
+            if none_mask[i]:
+                if seg_start >= 0:
+                    seg_len = i - seg_start
+                    if seg_len >= 2:
+                        pts = [QPointF(float(px_arr[seg_start + k]),
+                                       float(py_arr[seg_start + k]))
+                               for k in range(seg_len)]
+                        path.addPolygon(QPolygonF(pts))
+                seg_start = -1
+            else:
+                if seg_start < 0:
+                    seg_start = i
+        if seg_start >= 0:
+            seg_len = n - seg_start
+            if seg_len >= 2:
+                pts = [QPointF(float(px_arr[seg_start + k]),
+                               float(py_arr[seg_start + k]))
+                       for k in range(seg_len)]
+                path.addPolygon(QPolygonF(pts))
+        return path
+    started = False
+    for xi, yi in zip(fn_xs, fn_ys):
+        if yi is None:
+            started = False
+            continue
+        px = pr_left + (xi - x0) / dx * pr_width
+        py = pr_bottom - (yi - y0) / dy * pr_height
+        if not started:
+            path.moveTo(px, py)
+            started = True
+        else:
+            path.lineTo(px, py)
+    return path
 
 
 class _PlotCanvas(QWidget):
@@ -191,6 +288,22 @@ class _PlotCanvas(QWidget):
             if r and r[2] < best_d:
                 best_d = r[2]
                 best = (r[0], r[1], r[2], item)
+        for item in c.functions:
+            if not item.visible or not item.xs:
+                continue
+            fn_xs = item.xs
+            fn_ys_raw = item.ys
+            fn_xs_f = [fn_xs[i] for i in range(len(fn_xs)) if fn_ys_raw[i] is not None]
+            fn_ys_f = [fn_ys_raw[i] for i in range(len(fn_ys_raw)) if fn_ys_raw[i] is not None]
+            if not fn_xs_f:
+                continue
+            if _CY:
+                r = _cy_nearest(mouse.x(), mouse.y(), fn_xs_f, fn_ys_f, x0, dx, y0, dy, pl, pb, pw, ph, log_x, log_y)
+            else:
+                r = self._nearest_on_segments(mouse, fn_xs_f, fn_ys_f, pr, x0, dx, y0, dy, log_x, log_y)
+            if r and r[2] < best_d:
+                best_d = r[2]
+                best = (r[0], r[1], r[2], item)
         result = best if best and best[2] <= _SNAP_RADIUS_PX else None
         self._nearest_cache_key = key
         self._nearest_cache_result = result
@@ -237,10 +350,19 @@ class _PlotCanvas(QWidget):
         return None
 
     def _tangent_slope(self, item, xi):
-        if not isinstance(item, (_LineItem, _FitItem)) or len(item.xs) < 2:
+        if isinstance(item, _FunctionItem):
+            xs_raw = item.xs
+            ys_raw = item.ys
+            pairs = [(x, y) for x, y in zip(xs_raw, ys_raw) if y is not None]
+            if len(pairs) < 2:
+                return None
+            xs = [p[0] for p in pairs]
+            ys = [p[1] for p in pairs]
+        elif isinstance(item, (_LineItem, _FitItem)) and len(item.xs) >= 2:
+            xs = item.xs
+            ys = item.ys
+        else:
             return None
-        xs = item.xs
-        ys = item.ys
         n = len(xs)
         pos = bisect_left(xs, xi)
         if pos >= n:
@@ -718,21 +840,14 @@ class _PlotCanvas(QWidget):
         for fn_item in c.functions:
             if not fn_item.visible:
                 continue
-            fn_xs, fn_ys = fn_item.evaluate(x_lo_fn, x_hi_fn, max(1, pr.width()))
+            fn_xs, fn_ys = fn_item.evaluate(x_lo_fn, x_hi_fn, max(1, pr.width()), max(1, pr.height()))
             if len(fn_xs) < 2:
                 continue
-            path = QPainterPath()
-            started = False
-            for xi, yi in zip(fn_xs, fn_ys):
-                if yi is None:
-                    started = False
-                    continue
-                pt = self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, log_x, log_y)
-                if not started:
-                    path.moveTo(pt)
-                    started = True
-                else:
-                    path.lineTo(pt)
+            path = _build_fn_path_fast(
+                fn_xs, fn_ys, x0, dx, y0, dy,
+                float(pr.left()), float(pr.bottom()),
+                float(pr.width()), float(pr.height()),
+            )
             if fn_item.fill_under and not path.isEmpty():
                 fill_path = QPainterPath(path)
                 baseline_y = pr.bottom() - (0.0 - y0) / dy * pr.height()
