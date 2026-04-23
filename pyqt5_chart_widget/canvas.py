@@ -9,7 +9,7 @@ from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont,
                           QFontMetrics, QPainterPath, QPixmap, QWheelEvent, QMouseEvent)
 from .math_utils import (nice_ticks, nice_log_ticks, to_log, decimated,
                           fmt, get_fit_modes, trapezoid_integral)
-from .items import _LineItem, _ScatterItem, _FitItem, _InfLine
+from .items import _LineItem, _ScatterItem, _FitItem, _InfLine, _FunctionItem, _RulerItem
 from .i18n import tr
 if TYPE_CHECKING:
     from .chart_widget import ChartWidget
@@ -70,6 +70,7 @@ class _PlotCanvas(QWidget):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
         self._nearest_cache_key: Optional[tuple] = None
         self._nearest_cache_result = None
+        self._dragging_ruler_pt: Optional[int] = None
 
     def toggleAnalytics(self):
         self._show_analytics = not self._show_analytics
@@ -194,6 +195,19 @@ class _PlotCanvas(QWidget):
         self._nearest_cache_key = key
         self._nearest_cache_result = result
         return result
+
+    def _find_ruler_handle_at(self, pos: QPointF, pr, x0, dx, y0, dy) -> Optional[Tuple["_RulerItem", int]]:
+        """Return (ruler, endpoint_index) for the first handle under pos, or None."""
+        c = self._chart
+        log_x, log_y = c.log_x, c.log_y
+        for ruler in c.rulers:
+            if not ruler.visible or not ruler.draggable:
+                continue
+            for idx, (xv, yv) in enumerate(((ruler.x0, ruler.y0), (ruler.x1, ruler.y1))):
+                pt = self._to_pt_log(xv, yv, x0, dx, y0, dy, pr, log_x, log_y)
+                if math.hypot(pt.x() - pos.x(), pt.y() - pos.y()) <= ruler.handle_radius + 4:
+                    return (ruler, idx)
+        return None
 
     def _find_infline_at(self, pos: QPointF, pr, x0, dx, y0, dy) -> Optional[_InfLine]:
         c = self._chart
@@ -373,6 +387,12 @@ class _PlotCanvas(QWidget):
         c = self._chart
         x0, x1, y0, y1, dx, dy = self._view_params(pr)
         if ev.button() == Qt.MouseButton.LeftButton:
+            hit_ruler = self._find_ruler_handle_at(QPointF(ev.pos()), pr, x0, dx, y0, dy)
+            if hit_ruler:
+                self._dragging_ruler_pt = hit_ruler
+                self.setCursor(Qt.CursorShape.CrossCursor)
+                ev.accept()
+                return
             hit_infline = self._find_infline_at(QPointF(ev.pos()), pr, x0, dx, y0, dy)
             if hit_infline:
                 self._dragging_infline = hit_infline
@@ -408,6 +428,19 @@ class _PlotCanvas(QWidget):
         pr = self._plot_rect()
         self._mouse_pos = QPointF(ev.pos()) if pr.contains(ev.pos()) else None
         c = self._chart
+        if self._dragging_ruler_pt is not None:
+            x0, x1, y0, y1, dx, dy = self._view_params(pr)
+            ruler, pt_idx = self._dragging_ruler_pt
+            xv, yv = self._screen_to_data(ev.pos().x(), ev.pos().y(),
+                                           x0, dx, y0, dy, pr, c.log_x, c.log_y)
+            if pt_idx == 0:
+                ruler.x0, ruler.y0 = xv, yv
+            else:
+                ruler.x1, ruler.y1 = xv, yv
+            if ruler.changed is not None:
+                ruler.changed()
+            self.update()
+            return
         if self._dragging_infline is not None:
             x0, x1, y0, y1, dx, dy = self._view_params(pr)
             ln = self._dragging_infline
@@ -458,6 +491,11 @@ class _PlotCanvas(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, ev: QMouseEvent):
+        if self._dragging_ruler_pt is not None:
+            self._dragging_ruler_pt = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            ev.accept()
+            return
         if self._dragging_infline is not None:
             self._dragging_infline = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -674,6 +712,41 @@ class _PlotCanvas(QWidget):
                 formula = fit.getFormula()
                 if formula:
                     self._draw_formula_tag(p, QPointF(mid_flat_x, mid_flat_y), formula, fg, bg, fm)
+        for fn_item in c.functions:
+            if not fn_item.visible:
+                continue
+            fn_xs, fn_ys = fn_item.evaluate(x_lo, x_hi, max(1, pr.width()))
+            if len(fn_xs) < 2:
+                continue
+            path = QPainterPath()
+            started = False
+            for xi, yi in zip(fn_xs, fn_ys):
+                if yi is None:
+                    started = False
+                    continue
+                pt = self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, log_x, log_y)
+                if not started:
+                    path.moveTo(pt)
+                    started = True
+                else:
+                    path.lineTo(pt)
+            if fn_item.fill_under and not path.isEmpty():
+                fill_path = QPainterPath(path)
+                baseline_y = pr.bottom() - (0.0 - y0) / dy * pr.height()
+                baseline_y = max(float(pr.top()), min(float(pr.bottom()), baseline_y))
+                last_pt = path.currentPosition()
+                first_elem = path.elementAt(0)
+                fill_path.lineTo(last_pt.x(), baseline_y)
+                fill_path.lineTo(first_elem.x, baseline_y)
+                fill_path.closeSubpath()
+                fill_col = QColor(fn_item.pen.color())
+                fill_col.setAlpha(fn_item.fill_alpha)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(fill_col))
+                p.drawPath(fill_path)
+            p.setPen(fn_item.pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
         for item in c.lines:
             if not item.visible or not item.raw_visible or len(item.xs) < 2:
                 continue
@@ -824,7 +897,44 @@ class _PlotCanvas(QWidget):
             self._paint_analytics(p, pr, fg, bg, fm)
         if c.show_legend:
             self._paint_legend(p, pr, fg, bg, fm)
+        for ruler in c.rulers:
+            if ruler.visible:
+                self._paint_ruler(p, ruler, pr, x0, dx, y0, dy, fg, bg, fm)
+        c._notify_viewport_changed()
         p.end()
+
+    def _paint_ruler(self, p, ruler, pr, x0, dx, y0, dy, fg, bg, fm):
+        """Draw a ruler overlay with drag handles and a distance label."""
+        c = self._chart
+        log_x, log_y = c.log_x, c.log_y
+        pt0 = self._to_pt_log(ruler.x0, ruler.y0, x0, dx, y0, dy, pr, log_x, log_y)
+        pt1 = self._to_pt_log(ruler.x1, ruler.y1, x0, dx, y0, dy, pr, log_x, log_y)
+        p.setPen(ruler.pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawLine(pt0, pt1)
+        handle_col = QColor(ruler.pen.color())
+        handle_col.setAlpha(200)
+        p.setPen(QPen(handle_col, 1))
+        p.setBrush(QBrush(handle_col))
+        r = float(ruler.handle_radius)
+        p.drawEllipse(pt0, r, r)
+        p.drawEllipse(pt1, r, r)
+        mid = QPointF((pt0.x() + pt1.x()) / 2.0, (pt0.y() + pt1.y()) / 2.0)
+        from .math_utils import fmt
+        dist_lbl = f"d={fmt(ruler.distance)}  dx={fmt(ruler.dx)}  dy={fmt(ruler.dy)}"
+        tw = fm.horizontalAdvance(dist_lbl)
+        th = fm.height()
+        pad = 4
+        tx = int(mid.x()) - tw // 2
+        ty = int(mid.y()) - th - 6
+        bg_ = QColor(bg); bg_.setAlpha(210)
+        br_ = QColor(fg); br_.setAlpha(80)
+        p.setBrush(QBrush(bg_))
+        p.setPen(QPen(br_, 1))
+        p.drawRoundedRect(tx - pad, ty - pad // 2, tw + pad * 2, th + pad, 3, 3)
+        p.setPen(fg)
+        p.setFont(c.font)
+        p.drawText(tx, ty + fm.ascent(), dist_lbl)
 
     def _draw_formula_tag(self, p, pt, formula, fg, bg, fm):
         pad = 4
@@ -1044,6 +1154,10 @@ class _PlotCanvas(QWidget):
                 continue
             entries.append((fit.label or tr("chart_widget.analytics_fit", n=i + 1),
                              fit.pen.color(), False))
+        for i, fn_item in enumerate(c.functions):
+            if not fn_item.visible:
+                continue
+            entries.append((fn_item.label or f"f(x) {i + 1}", fn_item.pen.color(), False))
         if not entries:
             return
         pad = _LEGEND_PAD

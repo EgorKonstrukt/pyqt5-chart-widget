@@ -1,5 +1,5 @@
 from .chart_widget import ChartWidget
-from .items import _LineItem, _ScatterItem, _FitItem, _InfLine
+from .items import _LineItem, _ScatterItem, _FitItem, _InfLine, _FunctionItem, _RulerItem
 from .math_utils import FitMode, register_fit_mode, get_fit_modes, get_fit_mode
 from .sidebar import SidebarLabel, SidebarButton
 from .palette import set_palette, reset_colors
@@ -11,6 +11,8 @@ __all__ = [
     "_ScatterItem",
     "_FitItem",
     "_InfLine",
+    "_FunctionItem",
+    "_RulerItem",
     "FitMode",
     "register_fit_mode",
     "get_fit_modes",
@@ -23,4 +25,4 @@ __all__ = [
     "set_tr",
     "update_strings",
 ]
-__version__ = "4.1.1"
+__version__ = "4.2.0"

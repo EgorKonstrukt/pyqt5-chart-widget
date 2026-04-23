@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (QWidget, QSizePolicy, QFileDialog, QToolButton,
 from PyQt5.QtCore import Qt, QTimer, QEasingCurve
 from PyQt5.QtGui import QColor, QFont, QPen, QPixmap
 from .canvas import _PlotCanvas
-from .items import _LineItem, _ScatterItem, _FitItem, _InfLine
+from .items import _LineItem, _ScatterItem, _FitItem, _InfLine, _FunctionItem, _RulerItem
 from .sidebar import SidebarLabel
 from .i18n import tr
 from .math_utils import get_fit_modes, get_fit_mode
@@ -37,6 +37,10 @@ class ChartWidget(QWidget):
         self._scatters_r2: List[_ScatterItem] = []
         self._fits: List[_FitItem] = []
         self._inflines: List[_InfLine] = []
+        self._functions: List[_FunctionItem] = []
+        self._rulers: List[_RulerItem] = []
+        self._viewport_changed_callbacks = []
+        self._last_emitted_viewport: Optional[tuple] = None
         self._label_left = ""
         self._label_right = ""
         self._label_bottom = ""
@@ -285,9 +289,173 @@ class ChartWidget(QWidget):
         self._inflines.append(ln)
         return ln
 
+    def addFunction(self, fn, color: Optional[str] = None, width: int = 2,
+                    dashed: bool = False, label: str = "",
+                    resolution: float = 1.5) -> _FunctionItem:
+        """
+        Add a function plot item that evaluates ``fn`` over the visible x-range
+        on every repaint.
+
+        The callable signature is::
+
+            fn(xs: List[float]) -> List[float | None]
+
+        Values that are None, NaN or ±inf produce gaps in the curve so that
+        discontinuous functions (tan, 1/x, etc.) render correctly.
+
+        Parameters
+        ----------
+        fn:
+            Callable accepting a list of x values and returning a list of the
+            same length.
+        color:
+            Hex colour string.  Auto-assigned from the palette if omitted.
+        width:
+            Pen width in pixels.
+        dashed:
+            Draw the curve with a dashed line style.
+        label:
+            Legend label.
+        resolution:
+            Sample points per pixel of plot width.  Default 1.5.
+
+        Returns
+        -------
+        _FunctionItem
+            The newly created item.  Call ``item.setFunction(fn)`` to swap the
+            function later, ``item.setVisible(False)`` to hide it, etc.
+        """
+        c = color or next_line_color()
+        pen = QPen(QColor(c), width,
+                   Qt.PenStyle.DashLine if dashed else Qt.PenStyle.SolidLine)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        item = _FunctionItem(self, fn, pen, label, resolution)
+        self._functions.append(item)
+        self._canvas.update()
+        return item
+
+    def addRuler(self, x0: float = 0.0, y0: float = 0.0,
+                 x1: float = 1.0, y1: float = 1.0,
+                 color: str = "#e74c3c", width: int = 2,
+                 handle_radius: int = 6) -> _RulerItem:
+        """
+        Add an interactive measurement ruler to the chart.
+
+        The ruler is drawn as a line segment with circular drag handles at
+        each endpoint.  A tooltip above the midpoint shows the Euclidean
+        distance, dx and dy in data coordinates.
+
+        The ruler is hidden by default; call ``ruler.setVisible(True)`` to
+        show it.  Endpoints can be dragged by the user when the ruler is
+        visible and ``ruler.draggable`` is True.
+
+        Parameters
+        ----------
+        x0, y0:
+            Initial position of the first endpoint in data coordinates.
+        x1, y1:
+            Initial position of the second endpoint in data coordinates.
+        color:
+            Hex colour string for the ruler line and handles.
+        width:
+            Pen width in pixels.
+        handle_radius:
+            Pixel radius of the circular drag handles.
+
+        Returns
+        -------
+        _RulerItem
+            The newly created ruler.  Connect ``ruler.changed`` to a callable
+            to be notified whenever either endpoint moves.
+        """
+        pen = QPen(QColor(color), width)
+        ruler = _RulerItem(self, pen, handle_radius)
+        ruler.x0, ruler.y0, ruler.x1, ruler.y1 = x0, y0, x1, y1
+        self._rulers.append(ruler)
+        return ruler
+
+    def onViewportChanged(self, callback) -> None:
+        """
+        Register a callback that is invoked whenever the visible viewport
+        changes (pan, zoom, autofit, rubberband zoom).
+
+        The callback receives four positional arguments::
+
+            callback(x0: float, x1: float, y0: float, y1: float)
+
+        Multiple callbacks may be registered.  Use
+        ``removeViewportChangedCallback`` to deregister.
+        """
+        if callback not in self._viewport_changed_callbacks:
+            self._viewport_changed_callbacks.append(callback)
+
+    def removeViewportChangedCallback(self, callback) -> None:
+        """Remove a previously registered viewport-change callback."""
+        try:
+            self._viewport_changed_callbacks.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_viewport_changed(self):
+        """Called by the canvas on every paint; fires callbacks when the viewport has changed."""
+        vp = (self._vx0, self._vx1, self._vy0, self._vy1)
+        if vp == self._last_emitted_viewport:
+            return
+        self._last_emitted_viewport = vp
+        for cb in self._viewport_changed_callbacks:
+            try:
+                cb(self._vx0, self._vx1, self._vy0, self._vy1)
+            except Exception:
+                pass
+
+    @property
+    def viewport(self):
+        """
+        Current viewport as a named-tuple-like object with fields
+        x0, x1, y0, y1.
+
+        This is a lightweight read-only snapshot; it does not update
+        automatically.  Subscribe to ``onViewportChanged`` for live updates.
+        """
+        class _VP:
+            __slots__ = ("x0", "x1", "y0", "y1")
+            def __init__(self, x0, x1, y0, y1):
+                self.x0, self.x1, self.y0, self.y1 = x0, x1, y0, y1
+            def __repr__(self):
+                return (f"Viewport(x0={self.x0}, x1={self.x1}, "
+                        f"y0={self.y0}, y1={self.y1})")
+        return _VP(self._vx0, self._vx1, self._vy0, self._vy1)
+
+    def setViewport(self, x0: float, x1: float, y0: float, y1: float,
+                    animated: bool = False):
+        """
+        Programmatically set the visible data range.
+
+        Parameters
+        ----------
+        x0, x1:
+            Left and right data-space bounds.
+        y0, y1:
+            Bottom and top data-space bounds.
+        animated:
+            If True, the transition is animated using the configured easing
+            and duration.  If False, the view snaps immediately.
+        """
+        self._autofit_timer.stop()
+        if animated:
+            self._anim_start = (self._vx0, self._vx1, self._vy0, self._vy1)
+            self._anim_target = (x0, x1, y0, y1)
+            self._anim_elapsed = 0
+            if self._anim_start != self._anim_target:
+                self._anim_timer.start(_ANIM_FRAME_MS)
+                return
+        self._vx0, self._vx1, self._vy0, self._vy1 = x0, x1, y0, y1
+        self._canvas.update()
+
     def removeItem(self, item):
         for lst in (self._lines, self._scatters, self._fits, self._inflines,
-                    self._lines_r2, self._scatters_r2):
+                    self._lines_r2, self._scatters_r2,
+                    self._functions, self._rulers):
             if item in lst:
                 lst.remove(item)
         self._bounds_dirty = True
@@ -300,6 +468,8 @@ class ChartWidget(QWidget):
         self._inflines.clear()
         self._lines_r2.clear()
         self._scatters_r2.clear()
+        self._functions.clear()
+        self._rulers.clear()
         self._bounds_dirty = True
         self._canvas.update()
 
@@ -479,3 +649,7 @@ class ChartWidget(QWidget):
     def grid_px_x(self): return self._grid_px_x
     @property
     def grid_px_y(self): return self._grid_px_y
+    @property
+    def functions(self): return self._functions
+    @property
+    def rulers(self): return self._rulers
