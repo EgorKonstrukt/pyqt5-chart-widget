@@ -676,6 +676,9 @@ class _PlotCanvas(QWidget):
                 p.drawLine(sx, pr.top(), sx, pr.bottom())
         x_lo = min(c.vx0, c.vx1)
         x_hi = max(c.vx0, c.vx1)
+        _fn_margin = (x_hi - x_lo) * 0.05
+        x_lo_fn = x_lo - _fn_margin
+        x_hi_fn = x_hi + _fn_margin
         all_line_items = list(c.lines) + list(c.lines_r2)
         for fit in c.fits:
             if not fit.visible:
@@ -715,7 +718,7 @@ class _PlotCanvas(QWidget):
         for fn_item in c.functions:
             if not fn_item.visible:
                 continue
-            fn_xs, fn_ys = fn_item.evaluate(x_lo, x_hi, max(1, pr.width()))
+            fn_xs, fn_ys = fn_item.evaluate(x_lo_fn, x_hi_fn, max(1, pr.width()))
             if len(fn_xs) < 2:
                 continue
             path = QPainterPath()
