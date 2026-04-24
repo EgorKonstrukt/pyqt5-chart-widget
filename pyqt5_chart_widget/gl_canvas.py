@@ -345,7 +345,7 @@ def _log_pts_to_screen(xs: List[float], ys: List[float],
     return np.column_stack([sx, sy]).astype(np.float32)
 
 
-class _GLPlotCanvas(QOpenGLWidget):
+class PlotCanvas(QOpenGLWidget):
     def __init__(self, chart: "ChartWidget"):
         super().__init__(chart)
         self._chart = chart
@@ -365,6 +365,7 @@ class _GLPlotCanvas(QOpenGLWidget):
         self._nearest_cache_key: Optional[tuple] = None
         self._nearest_cache_result = None
         self._dragging_ruler_pt: Optional[int] = None
+        self.context_menu = None
 
         fmt = QSurfaceFormat()
         fmt.setSamples(8)
@@ -375,9 +376,12 @@ class _GLPlotCanvas(QOpenGLWidget):
         self.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.context_menu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
+
 
     def initializeGL(self):
+        if self._renderer is not None:
+            return
         try:
             self._renderer = _GLRenderer()
             glEnable(GL_MULTISAMPLE)
@@ -1109,14 +1113,16 @@ class _GLPlotCanvas(QOpenGLWidget):
     def grab_image(self) -> QPixmap:
         return self.grab()
 
-    def contextMenuEvent(self, ev):
+    def _show_context_menu(self, pos):
         from PyQt5.QtWidgets import QMenu, QAction, QActionGroup
+        from PyQt5.QtGui import QCursor
+        from PyQt5.QtCore import QTimer
         c = self._chart
         menu = QMenu(self)
         act_autofit = QAction(tr("chart_widget.btn_autofit_toggle"), menu)
         act_autofit.setCheckable(True)
-        act_autofit.setChecked(c._autofit)
-        act_autofit.triggered.connect(lambda v: c.setAutofit(v))
+        act_autofit.setChecked(c._autofit_enabled)
+        act_autofit.triggered.connect(c.setAutofitEnabled)
         menu.addAction(act_autofit)
         act_latest = QAction(tr("chart_widget.btn_latest"), menu)
         act_latest.setCheckable(True)
@@ -1189,7 +1195,8 @@ class _GLPlotCanvas(QOpenGLWidget):
         menu.addAction(tr("chart_widget.ctx_export_img"), c.exportImage)
         menu.addSeparator()
         menu.addAction(tr("chart_widget.ctx_reset_view"), c.autofit)
-        menu.exec_(ev.globalPos())
+        gpos = QCursor.pos()
+        QTimer.singleShot(0, lambda: menu.exec_(gpos))
 
     def wheelEvent(self, ev: QWheelEvent):
         pr = self._plot_rect()
@@ -1251,6 +1258,8 @@ class _GLPlotCanvas(QOpenGLWidget):
             self._pan_vx0 = c.vx0
             self._pan_vy0 = c.vy0
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            ev.accept()
+        elif ev.button() == Qt.MouseButton.RightButton:
             ev.accept()
         elif ev.button() == Qt.MouseButton.MiddleButton:
             self._pan_start = QPointF(ev.pos())

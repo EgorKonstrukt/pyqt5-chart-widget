@@ -73,20 +73,19 @@ def make_canvas(chart) -> object:
     """
     Instantiate the best available canvas for *chart*.
 
-    Returns a _GLPlotCanvas when OpenGL is confirmed functional at runtime,
+    Returns a PlotCanvas (OpenGL) when OpenGL is confirmed functional at runtime,
     otherwise falls back to the software _PlotCanvas transparently.
     Both expose an identical public interface.
     """
     global _GL_ERROR
     _ensure_probed()
     if _GL_AVAILABLE:
-        try:
-            from .gl_canvas import _GLPlotCanvas
-            return _GLPlotCanvas(chart)
-        except Exception as exc:
-            _GL_ERROR = f"gl_canvas import failed: {exc}"
-    from .canvas import _PlotCanvas
-    return _PlotCanvas(chart)
+        from .gl_canvas import PlotCanvas
+        return PlotCanvas(chart)
+    else:
+        _GL_ERROR = "gl_canvas is not available"
+        from .canvas import _PlotCanvas
+        return _PlotCanvas(chart)
 
 
 def backend_name() -> str:

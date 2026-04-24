@@ -61,6 +61,11 @@ class ChartWidget(QWidget):
         self._bounds_r2_cache: Tuple[float, float] = (0.0, 1.0)
         self._last_autofit_t = 0.0
         self._canvas = _make_canvas(self)
+        if self._canvas is None:
+            raise RuntimeError(
+                "make_canvas() returned None — check that pyqt5_chart_widget/canvas.py "
+                "exists and that _PlotCanvas can be imported from it."
+            )
         self._toolbar_layout = self._build_toolbar()
         self._toolbar_widget = QWidget(self)
         self._toolbar_widget.setLayout(self._toolbar_layout)
