@@ -6,6 +6,13 @@ from PyQt5.QtGui import QColor, QPen
 if TYPE_CHECKING:
     from .chart_widget import ChartWidget
 
+try:
+    import numpy as _np_items
+    _NP_ITEMS = True
+except ImportError:
+    _np_items = None
+    _NP_ITEMS = False
+
 
 class _InfLine:
     def __init__(self, chart: "ChartWidget", horizontal: bool, value: float, pen: QPen):
@@ -211,24 +218,19 @@ class _FunctionItem:
 
     def evaluate(self, x_lo: float, x_hi: float, pixel_width: int,
                  pixel_height: int = 600) -> Tuple[List[float], List[Optional[float]]]:
-        try:
-            import numpy as _np
-            _NP = True
-        except ImportError:
-            _NP = False
         n_pts = max(4, int(pixel_width * min(self.resolution, 1.0)))
         key = (round(x_lo, 12), round(x_hi, 12), n_pts)
         if key == self._cache_key:
             return self._cached_xs, self._cached_ys
         from .math_utils import linspace as _linspace
-        xs_base = _linspace(x_lo, x_hi, n_pts) if not _NP else \
-                  list(_np.linspace(x_lo, x_hi, n_pts, dtype=_np.float64))
+        if _NP_ITEMS:
+            xs_base = _np_items.linspace(x_lo, x_hi, n_pts, dtype=_np_items.float64).tolist()
+        else:
+            xs_base = _linspace(x_lo, x_hi, n_pts)
         if self._adaptive and self._expr:
             try:
                 from .math_engine import sample_y_adaptive
                 xs_ad, ys_ad = sample_y_adaptive(self._expr, xs_base, self._extra)
-                if _NP and len(xs_ad) > 0:
-                    xs_ad, ys_ad = _screen_decimate(xs_ad, ys_ad, x_lo, x_hi, pixel_width, pixel_height)
                 self._cached_xs = xs_ad
                 self._cached_ys = ys_ad
                 self._cache_key = key
@@ -242,11 +244,14 @@ class _FunctionItem:
             self._cached_ys = [None] * len(xs_base)
             self._cache_key = key
             return self._cached_xs, self._cached_ys
-        if _NP:
-            import numpy as _np2
-            raw_arr = _np2.array([v if v is not None else _np2.nan for v in raw], dtype=_np2.float64)
-            fin = _np2.isfinite(raw_arr)
-            ys: List[Optional[float]] = [float(raw_arr[i]) if fin[i] else None for i in range(len(raw_arr))]
+        if _NP_ITEMS:
+            raw_arr = _np_items.array(
+                [v if v is not None else _np_items.nan for v in raw], dtype=_np_items.float64
+            )
+            fin = _np_items.isfinite(raw_arr)
+            ys: List[Optional[float]] = [
+                float(raw_arr[i]) if fin[i] else None for i in range(len(raw_arr))
+            ]
         else:
             _isfinite = math.isfinite
             ys = []

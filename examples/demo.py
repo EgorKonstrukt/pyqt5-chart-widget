@@ -13,7 +13,6 @@ from pyqt5_chart_widget import (ChartWidget, FitMode, register_fit_mode,
                                 set_palette, update_strings,
                                 _FunctionItem, _RulerItem)
 
-
 def _damped_fit(x_pts, y_pts, x_eval):
     if not x_pts:
         return [0.0] * len(x_eval)
@@ -92,7 +91,7 @@ class _FunctionRow(QWidget):
         self._fn_item: _FunctionItem = None
 
         self._edit = QLineEdit(expr)
-        self._edit.setFont(QFont("Monospace", 10))
+        self._edit.setFont(QFont("Monospace", 12))
         self._edit.setPlaceholderText("e.g. sin(x)*exp(-0.1*x)")
         self._edit.returnPressed.connect(self._apply)
         self._edit.textChanged.connect(self._on_text_changed)
@@ -132,7 +131,7 @@ class _FunctionRow(QWidget):
 
     def _build_item(self, expr: str) -> _FunctionItem:
         fn = _compile_expression(expr)
-        pen = QPen(QColor(self._color), 2)
+        pen = QPen(QColor(self._color), 6)
         item = _FunctionItem(self._chart, fn or (lambda xs: [None] * len(xs)), pen, expr or "f(x)")
         self._chart._functions.append(item)
         self._chart._canvas.update()
@@ -218,6 +217,7 @@ class GraphingCalculatorTab(QWidget):
         super().__init__()
 
         self.chart = ChartWidget(show_toolbar=True, show_legend=True)
+
         self.chart.setLabel("left", "y")
         self.chart.setLabel("bottom", "x")
         self.chart.setAutofitEnabled(False)
@@ -297,6 +297,7 @@ class GraphingCalculatorTab(QWidget):
         layout.addWidget(scroll, 1)
         layout.addWidget(add_btn)
         layout.addLayout(preset_row)
+
         return grp
 
     def _build_controls(self) -> QHBoxLayout:
@@ -356,7 +357,7 @@ class LiveTab(QWidget):
     def __init__(self):
         super().__init__()
         self._tick = 0
-        self._buf = 200
+        self._buf = 2000
         self._xs, self._ys1, self._ys2 = [], [], []
         self._sc_x, self._sc_y, self._sc_ey = [], [], []
         self._sc_ann = []
@@ -421,7 +422,7 @@ class LiveTab(QWidget):
 
         self.timer = QTimer()
         self.timer.timeout.connect(self._tick_data)
-        self.timer.start(20)
+        self.timer.start(1)
 
     def _on_point_clicked(self, x, y, idx):
         self._status.setText(f"Peak selected  x={x:.3f}  y={y:.3f}  idx={idx}")

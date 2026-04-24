@@ -66,7 +66,7 @@ except Exception:
 
 setup(
     name="pyqt5-chart-widget",
-    version="4.2.4",
+    version="5.0.0",
     description="Lightweight interactive chart widget for PyQt5 with built-in approximation, multi-series, and extensible fit modes",
     long_description=open(os.path.join(root, "README.md"), encoding="utf-8").read(),
     long_description_content_type="text/markdown",

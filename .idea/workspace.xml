@@ -1,20 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="0e6f6487-f0d2-462a-83a6-ad15c4ba80ee" name="Changes" comment="3.0.0 fit threading">
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+    <list default="true" id="0e6f6487-f0d2-462a-83a6-ad15c4ba80ee" name="Changes" comment="4.2.4">
+      <change afterPath="$PROJECT_DIR$/pyqt5_chart_widget/canvas_backend.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/pyqt5_chart_widget/gl_canvas.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/examples/demo.py" beforeDir="false" afterPath="$PROJECT_DIR$/examples/demo.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/_cy_utils.pyx" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/_cy_utils.pyx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/canvas.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/canvas.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/chart_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/chart_widget.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/i18n.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/items.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/items.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/math_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/math_utils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/setup.py" beforeDir="false" afterPath="$PROJECT_DIR$/setup.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -58,21 +54,23 @@
     &quot;Python.__init__.executor&quot;: &quot;Run&quot;,
     &quot;Python.canvas.executor&quot;: &quot;Run&quot;,
     &quot;Python.demo.executor&quot;: &quot;Run&quot;,
+    &quot;Python.setup.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/Zarrakun/PycharmProjects/pyqt5-chart-widget&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/Zarrakun/PycharmProjects/pyqt5-chart-widget/pyqt5_chart_widget&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.updates&quot;
   }
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\Zarrakun\PycharmProjects\pyqt5-chart-widget\pyqt5_chart_widget" />
       <recent name="C:\Users\Zarrakun\PycharmProjects\pyqt5-chart-widget" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\Users\Zarrakun\PycharmProjects\pyqt5-chart-widget\examples" />
       <recent name="C:\Users\Zarrakun\PycharmProjects\pyqt5-chart-widget\pyqt5_chart_widget" />
+      <recent name="C:\Users\Zarrakun\PycharmProjects\pyqt5-chart-widget\examples" />
       <recent name="C:\Users\Zarrakun\PycharmProjects\pyqt5-chart-widget" />
     </key>
   </component>
@@ -146,9 +144,33 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="setup" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="pyqt5-chart-widget" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/setup.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <recent_temporary>
       <list>
         <item itemvalue="Python.demo" />
+        <item itemvalue="Python.setup" />
         <item itemvalue="Python.__init__" />
         <item itemvalue="Python.canvas" />
       </list>
@@ -157,7 +179,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-0978a7220b69-9867c7d4c0a4-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.28294.336" />
+        <option value="bundled-python-sdk-1cd77e80b48f-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.32098.74" />
       </set>
     </attachedChunks>
   </component>
@@ -201,14 +223,97 @@
       <option name="project" value="LOCAL" />
       <updated>1774673705293</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="3.1.0">
+      <option name="closed" value="true" />
+      <created>1774771028425</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1774771028425</updated>
+    </task>
+    <task id="LOCAL-00006" summary="3.2.0">
+      <option name="closed" value="true" />
+      <created>1774857382249</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1774857382249</updated>
+    </task>
+    <task id="LOCAL-00007" summary="4.0.0">
+      <option name="closed" value="true" />
+      <created>1776589629508</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1776589629508</updated>
+    </task>
+    <task id="LOCAL-00008" summary="4.1.0">
+      <option name="closed" value="true" />
+      <created>1776745530250</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1776745530250</updated>
+    </task>
+    <task id="LOCAL-00009" summary="4.1.1">
+      <option name="closed" value="true" />
+      <created>1776746563235</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1776746563235</updated>
+    </task>
+    <task id="LOCAL-00010" summary="4.2.0">
+      <option name="closed" value="true" />
+      <created>1776910644894</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1776910644894</updated>
+    </task>
+    <task id="LOCAL-00011" summary="4.2.1">
+      <option name="closed" value="true" />
+      <created>1776929716961</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1776929716961</updated>
+    </task>
+    <task id="LOCAL-00012" summary="4.2.4">
+      <option name="closed" value="true" />
+      <created>1776962093423</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1776962093423</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Initial commit" />
     <MESSAGE value="2.0.0" />
     <MESSAGE value="2.1.0 added fit easing" />
     <MESSAGE value="3.0.0 fit threading" />
-    <option name="LAST_COMMIT_MESSAGE" value="3.0.0 fit threading" />
+    <MESSAGE value="3.1.0" />
+    <MESSAGE value="3.2.0" />
+    <MESSAGE value="4.0.0" />
+    <MESSAGE value="4.1.0" />
+    <MESSAGE value="4.1.1" />
+    <MESSAGE value="4.2.0" />
+    <MESSAGE value="4.2.1" />
+    <MESSAGE value="4.2.4" />
+    <option name="LAST_COMMIT_MESSAGE" value="4.2.4" />
   </component>
 </project>

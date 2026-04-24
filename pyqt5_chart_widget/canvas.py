@@ -75,30 +75,21 @@ def _build_fn_path_fast(fn_xs, fn_ys,
             fn_xs, fn_ys, x0, dx, y0, dy,
             pr_left, pr_bottom, pr_width, pr_height,
         )
-        seg_start = -1
-        i = 0
-        while i < count:
+        if count < 2:
+            return path
+        path.reserve(count + 4)
+        started = False
+        for i in range(count):
             px = buf[i * 2]
             if px >= _SENTINEL:
-                if seg_start >= 0:
-                    seg_len = i - seg_start
-                    if seg_len >= 2:
-                        pts = [QPointF(buf[(seg_start + k) * 2],
-                                       buf[(seg_start + k) * 2 + 1])
-                               for k in range(seg_len)]
-                        path.addPolygon(QPolygonF(pts))
-                seg_start = -1
+                started = False
             else:
-                if seg_start < 0:
-                    seg_start = i
-            i += 1
-        if seg_start >= 0:
-            seg_len = count - seg_start
-            if seg_len >= 2:
-                pts = [QPointF(buf[(seg_start + k) * 2],
-                               buf[(seg_start + k) * 2 + 1])
-                       for k in range(seg_len)]
-                path.addPolygon(QPolygonF(pts))
+                py = buf[i * 2 + 1]
+                if not started:
+                    path.moveTo(px, py)
+                    started = True
+                else:
+                    path.lineTo(px, py)
         return path
     if _NP_CANVAS:
         xs_arr = _np.asarray(fn_xs, dtype=_np.float64)
@@ -108,27 +99,17 @@ def _build_fn_path_fast(fn_xs, fn_ys,
         py_arr = pr_bottom - (ys_raw - y0) / dy * pr_height
         _np.clip(px_arr, -_COORD_CLAMP, _COORD_CLAMP, out=px_arr)
         _np.clip(py_arr, -_SCREEN_Y_CLAMP, _SCREEN_Y_CLAMP, out=py_arr)
-        seg_start = -1
+        path.reserve(n + 4)
+        started = False
         for i in range(n):
             if none_mask[i]:
-                if seg_start >= 0:
-                    seg_len = i - seg_start
-                    if seg_len >= 2:
-                        pts = [QPointF(float(px_arr[seg_start + k]),
-                                       float(py_arr[seg_start + k]))
-                               for k in range(seg_len)]
-                        path.addPolygon(QPolygonF(pts))
-                seg_start = -1
+                started = False
             else:
-                if seg_start < 0:
-                    seg_start = i
-        if seg_start >= 0:
-            seg_len = n - seg_start
-            if seg_len >= 2:
-                pts = [QPointF(float(px_arr[seg_start + k]),
-                               float(py_arr[seg_start + k]))
-                       for k in range(seg_len)]
-                path.addPolygon(QPolygonF(pts))
+                if not started:
+                    path.moveTo(float(px_arr[i]), float(py_arr[i]))
+                    started = True
+                else:
+                    path.lineTo(float(px_arr[i]), float(py_arr[i]))
         return path
     started = False
     for xi, yi in zip(fn_xs, fn_ys):

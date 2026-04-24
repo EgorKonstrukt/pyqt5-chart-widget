@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QWidget, QSizePolicy, QFileDialog, QToolButton,
                               QHBoxLayout, QVBoxLayout, QStyle, QMenu, QAction)
 from PyQt5.QtCore import Qt, QTimer, QEasingCurve
 from PyQt5.QtGui import QColor, QFont, QPen, QPixmap
-from .canvas import _PlotCanvas
+from .canvas_backend import make_canvas as _make_canvas
 from .items import _LineItem, _ScatterItem, _FitItem, _InfLine, _FunctionItem, _RulerItem
 from .sidebar import SidebarLabel
 from .i18n import tr
@@ -60,7 +60,7 @@ class ChartWidget(QWidget):
         self._bounds_cache: Tuple[float, float, float, float] = (0.0, 1.0, 0.0, 1.0)
         self._bounds_r2_cache: Tuple[float, float] = (0.0, 1.0)
         self._last_autofit_t = 0.0
-        self._canvas = _PlotCanvas(self)
+        self._canvas = _make_canvas(self)
         self._toolbar_layout = self._build_toolbar()
         self._toolbar_widget = QWidget(self)
         self._toolbar_widget.setLayout(self._toolbar_layout)
@@ -73,6 +73,9 @@ class ChartWidget(QWidget):
         self._anim_start: Optional[Tuple] = None
         self._anim_target: Optional[Tuple] = None
         self._anim_elapsed = 0
+        self._viewport_notify_timer = QTimer(self)
+        self._viewport_notify_timer.setSingleShot(True)
+        self._viewport_notify_timer.timeout.connect(self._emit_viewport_changed)
         self._autofit_timer = QTimer(self)
         self._autofit_timer.setSingleShot(True)
         self._autofit_timer.timeout.connect(self._deferred_autofit)
@@ -407,6 +410,14 @@ class ChartWidget(QWidget):
                 cb(self._vx0, self._vx1, self._vy0, self._vy1)
             except Exception:
                 pass
+
+    def _schedule_viewport_changed(self):
+        if self._viewport_notify_timer.isActive():
+            return
+        self._viewport_notify_timer.start(0)
+
+    def _emit_viewport_changed(self):
+        self._notify_viewport_changed()
 
     @property
     def viewport(self):
