@@ -359,14 +359,25 @@ def decimated(xs: List[float], ys: List[float], max_pts: int) -> Tuple[List[floa
 
 
 def fmt(v: float) -> str:
+    """Format a numeric value for display, avoiding scientific notation."""
     if not math.isfinite(v):
         return str(v)
     if v == 0:
         return "0"
-    if abs(v) >= 1000 or (abs(v) < 0.001 and v != 0):
-        return f"{v:.3g}"
-    if abs(v) >= 100:
+    abs_v = abs(v)
+    if abs_v >= 1e15:
+        return f"{v:.6g}"
+    if abs_v >= 1000:
         return f"{v:.0f}"
-    if abs(v) >= 10:
+    if abs_v >= 100:
+        return f"{v:.0f}"
+    if abs_v >= 10:
         return f"{v:.1f}"
-    return f"{v:.3g}"
+    if abs_v >= 1:
+        s = f"{v:.4g}"
+        return s
+    for digits in range(1, 10):
+        s = f"{v:.{digits}f}".rstrip("0").rstrip(".")
+        if float(s) != 0.0:
+            return s
+    return f"{v:.4g}"

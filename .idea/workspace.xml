@@ -1,16 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="0e6f6487-f0d2-462a-83a6-ad15c4ba80ee" name="Changes" comment="4.2.4">
-      <change afterPath="$PROJECT_DIR$/pyqt5_chart_widget/canvas_backend.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pyqt5_chart_widget/gl_canvas.py" afterDir="false" />
+    <list default="true" id="0e6f6487-f0d2-462a-83a6-ad15c4ba80ee" name="Changes" comment="5.0.1">
+      <change afterPath="$PROJECT_DIR$/pyqt5_chart_widget/canvas_base.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/examples/demo.py" beforeDir="false" afterPath="$PROJECT_DIR$/examples/demo.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/_cy_utils.pyx" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/_cy_utils.pyx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/canvas.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/canvas.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/chart_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/chart_widget.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/items.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/items.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/gl_canvas.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/gl_canvas.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pyqt5_chart_widget/math_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/pyqt5_chart_widget/math_utils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/setup.py" beforeDir="false" afterPath="$PROJECT_DIR$/setup.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -287,7 +284,23 @@
       <option name="project" value="LOCAL" />
       <updated>1776962093423</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL-00013" summary="5.0.0">
+      <option name="closed" value="true" />
+      <created>1777052789255</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1777052789255</updated>
+    </task>
+    <task id="LOCAL-00014" summary="5.0.1">
+      <option name="closed" value="true" />
+      <created>1777056613110</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1777056613110</updated>
+    </task>
+    <option name="localTasksCounter" value="15" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -314,6 +327,8 @@
     <MESSAGE value="4.2.0" />
     <MESSAGE value="4.2.1" />
     <MESSAGE value="4.2.4" />
-    <option name="LAST_COMMIT_MESSAGE" value="4.2.4" />
+    <MESSAGE value="5.0.0" />
+    <MESSAGE value="5.0.1" />
+    <option name="LAST_COMMIT_MESSAGE" value="5.0.1" />
   </component>
 </project>
