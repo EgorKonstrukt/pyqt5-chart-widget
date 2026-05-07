@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .chart_widget import ChartWidget
 
 _ML, _MT, _MR, _MB = 58, 14, 20, 40
+_MT_TITLE = 26
 _MR2 = 52
 _ZOOM_FACTOR = 1.15
 _ZOOM_MIN_SPAN = 1e-10
@@ -167,7 +168,8 @@ class CanvasBase:
     def _plot_rect(self) -> QRect:
         ml = _ML + (4 if self._chart.label_left else 0)
         mr = (_MR2 if self._has_right_axis() else _MR) + (4 if self._chart.label_right else 0)
-        return QRect(ml, _MT, max(1, self.width() - ml - mr), max(1, self.height() - _MT - _MB))
+        mt = (_MT_TITLE if self._chart.label_title else _MT)
+        return QRect(ml, mt, max(1, self.width() - ml - mr), max(1, self.height() - mt - _MB))
 
     def _to_pt(self, xv, yv, x0, dx, y0, dy, pr) -> QPointF:
         px = pr.left() + (xv - x0) / dx * pr.width()

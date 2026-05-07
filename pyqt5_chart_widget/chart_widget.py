@@ -45,6 +45,8 @@ class ChartWidget(QWidget):
         self._label_left = ""
         self._label_right = ""
         self._label_bottom = ""
+        self._label_title = ""
+        self._title_font: Optional[QFont] = None
         self._font = font or QFont("Arial", 8)
         self._vx0 = 0.0; self._vx1 = 1.0
         self._vy0 = 0.0; self._vy1 = 1.0
@@ -220,6 +222,12 @@ class ChartWidget(QWidget):
         if side == "left": self._label_left = text
         elif side == "bottom": self._label_bottom = text
         elif side == "right": self._label_right = text
+        self._canvas.update()
+
+    def setTitle(self, text: str, font: Optional[QFont] = None):
+        """Set the chart title drawn above the plot area and included in image exports."""
+        self._label_title = text
+        self._title_font = font
         self._canvas.update()
 
     def setFont(self, font: QFont):
@@ -592,10 +600,11 @@ class ChartWidget(QWidget):
             tr("chart_widget.img_filter"))
         if not path:
             return
-        self._canvas.grab_image().save(path)
+        self.grab().save(path)
 
     def grabImage(self) -> QPixmap:
-        return self._canvas.grab_image()
+        """Return a QPixmap of the full widget (title, toolbar, canvas) for export."""
+        return self.grab()
 
     @property
     def vx0(self): return self._vx0
@@ -635,6 +644,10 @@ class ChartWidget(QWidget):
     def label_right(self): return self._label_right
     @property
     def label_bottom(self): return self._label_bottom
+    @property
+    def label_title(self): return self._label_title
+    @property
+    def title_font(self): return self._title_font
     @property
     def grid_px_x(self): return self._grid_px_x
     @property

@@ -44,7 +44,7 @@ from .canvas_base import (CanvasBase, _fmt_axis,
                            _ANALYTICS_PAD, _ANALYTICS_ROW_H, _ANALYTICS_MAX_SERIES,
                            _TOOLTIP_MARGIN, _LEGEND_PAD, _LEGEND_SWATCH,
                            _LATEST_TAG_PAD, _LATEST_TAG_ROUND,
-                           _ORIGIN_AXIS_ALPHA)
+                           _ORIGIN_AXIS_ALPHA, _MT_TITLE)
 from .math_utils import (nice_ticks, nice_log_ticks, to_log, decimated,
                          fmt, get_fit_modes, trapezoid_integral)
 from .items import _LineItem, _ScatterItem, _FitItem, _InfLine, _FunctionItem, _RulerItem
@@ -667,6 +667,15 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
         self._renderer._last_prog = -1
         p.endNativePainting()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if c.label_title:
+            tf = c.title_font or QFont(c.font.family(), c.font.pointSize() + 3, QFont.Weight.Bold)
+            p.setFont(tf)
+            tfm = QFontMetrics(tf)
+            lw_title = tfm.horizontalAdvance(c.label_title)
+            tx = (self.width() - lw_title) // 2
+            ty = tfm.ascent() + 3
+            p.setPen(QColor(fg))
+            p.drawText(tx, ty, c.label_title)
         fm = QFontMetrics(c.font)
         p.setFont(c.font)
         lb_col = QColor(fg); lb_col.setAlpha(255)

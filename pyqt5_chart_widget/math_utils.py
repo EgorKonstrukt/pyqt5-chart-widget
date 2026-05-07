@@ -12,6 +12,266 @@ except ImportError:
 _NICE_TICKS_MAX = 64
 
 
+def derivative(xs: List[float], ys: List[float]) -> Tuple[List[float], List[float]]:
+    """Numerical derivative using central differences (forward/backward at edges)."""
+    n = len(xs)
+    if n < 2:
+        return [], []
+    dydx = []
+    for i in range(n):
+        if i == 0:
+            dx = xs[1] - xs[0]
+            dy = ys[1] - ys[0]
+        elif i == n - 1:
+            dx = xs[-1] - xs[-2]
+            dy = ys[-1] - ys[-2]
+        else:
+            dx = xs[i + 1] - xs[i - 1]
+            dy = ys[i + 1] - ys[i - 1]
+        dydx.append(dy / dx if abs(dx) > 1e-15 else 0.0)
+    return list(xs), dydx
+
+
+def second_derivative(xs: List[float], ys: List[float]) -> Tuple[List[float], List[float]]:
+    """Second derivative d²y/dx² via second-order finite differences."""
+    n = len(xs)
+    if n < 3:
+        return [], []
+    out = []
+    for i in range(1, n - 1):
+        dx1 = xs[i] - xs[i - 1]
+        dx2 = xs[i + 1] - xs[i]
+        if abs(dx1) < 1e-15 or abs(dx2) < 1e-15:
+            out.append(0.0)
+        else:
+            out.append(2 * ((ys[i + 1] - ys[i]) / dx2 - (ys[i] - ys[i - 1]) / dx1) / (dx1 + dx2))
+    return xs[1:-1], out
+
+
+def cumulative_integral(xs: List[float], ys: List[float]) -> Tuple[List[float], List[float]]:
+    """Cumulative trapezoid integral starting from xs[0]."""
+    if len(xs) < 2:
+        return list(xs), [0.0] * len(xs)
+    result = [0.0]
+    for i in range(1, len(xs)):
+        dx = xs[i] - xs[i - 1]
+        result.append(result[-1] + dx * (ys[i - 1] + ys[i]) / 2.0)
+    return list(xs), result
+
+
+def fft_spectrum(xs: List[float], ys: List[float]) -> Tuple[List[float], List[float]]:
+    """Compute single-sided power spectrum via DFT. Returns (frequencies, amplitudes)."""
+    n = len(ys)
+    if n < 4:
+        return [], []
+    dt = (xs[-1] - xs[0]) / (n - 1) if n > 1 else 1.0
+    if dt <= 0:
+        return [], []
+    re = list(ys)
+    im = [0.0] * n
+    for k in range(n):
+        re[k] = sum(ys[j] * math.cos(2 * math.pi * k * j / n) for j in range(n))
+        im[k] = -sum(ys[j] * math.sin(2 * math.pi * k * j / n) for j in range(n))
+    half = n // 2 + 1
+    freqs = [k / (n * dt) for k in range(half)]
+    amps = [math.sqrt(re[k] ** 2 + im[k] ** 2) / n * (1 if k == 0 else 2) for k in range(half)]
+    return freqs, amps
+
+
+def fft_spectrum_numpy(xs: List[float], ys: List[float]) -> Tuple[List[float], List[float]]:
+    """Fast FFT using numpy if available, falls back to fft_spectrum."""
+    try:
+        import numpy as np
+        n = len(ys)
+        if n < 4:
+            return [], []
+        dt = (xs[-1] - xs[0]) / (n - 1) if n > 1 else 1.0
+        if dt <= 0:
+            return [], []
+        fft = np.fft.rfft(ys)
+        freqs = np.fft.rfftfreq(n, dt).tolist()
+        amps = (np.abs(fft) / n * np.array([1] + [2] * (len(fft) - 1))).tolist()
+        return freqs, amps
+    except ImportError:
+        return fft_spectrum(xs, ys)
+
+
+def histogram(data: List[float], bins: int = 20) -> Tuple[List[float], List[float]]:
+    """Compute histogram bin edges and counts. Returns (bin_centers, counts)."""
+    if not data or bins < 1:
+        return [], []
+    lo, hi = min(data), max(data)
+    if lo == hi:
+        return [lo], [float(len(data))]
+    width = (hi - lo) / bins
+    counts = [0] * bins
+    for v in data:
+        idx = min(int((v - lo) / width), bins - 1)
+        counts[idx] += 1
+    centers = [lo + (i + 0.5) * width for i in range(bins)]
+    return centers, [float(c) for c in counts]
+
+
+def autocorrelation(ys: List[float], max_lag: Optional[int] = None) -> Tuple[List[int], List[float]]:
+    """Normalized autocorrelation for lags 0..max_lag."""
+    n = len(ys)
+    if n < 2:
+        return [], []
+    lim = min(max_lag or n - 1, n - 1)
+    mean = sum(ys) / n
+    var = sum((v - mean) ** 2 for v in ys)
+    if var < 1e-15:
+        return list(range(lim + 1)), [1.0] + [0.0] * lim
+    lags = list(range(lim + 1))
+    acf = []
+    for lag in lags:
+        c = sum((ys[i] - mean) * (ys[i + lag] - mean) for i in range(n - lag))
+        acf.append(c / var)
+    return lags, acf
+
+
+def normalize(ys: List[float], method: str = "minmax") -> List[float]:
+    """Normalize data. Methods: 'minmax' [0,1], 'zscore', 'maxabs'."""
+    if not ys:
+        return []
+    if method == "minmax":
+        lo, hi = min(ys), max(ys)
+        rng = hi - lo
+        return [(v - lo) / rng if rng > 1e-15 else 0.0 for v in ys]
+    if method == "zscore":
+        n = len(ys)
+        mean = sum(ys) / n
+        std = math.sqrt(sum((v - mean) ** 2 for v in ys) / n)
+        return [(v - mean) / std if std > 1e-15 else 0.0 for v in ys]
+    if method == "maxabs":
+        ma = max(abs(v) for v in ys)
+        return [v / ma if ma > 1e-15 else 0.0 for v in ys]
+    return list(ys)
+
+
+def peak_find(xs: List[float], ys: List[float],
+              min_prominence: float = 0.0) -> Tuple[List[float], List[float]]:
+    """Find local maxima with optional prominence threshold. Returns (x_peaks, y_peaks)."""
+    n = len(ys)
+    if n < 3:
+        return [], []
+    y_range = max(ys) - min(ys) if n else 1.0
+    px, py = [], []
+    for i in range(1, n - 1):
+        if ys[i] > ys[i - 1] and ys[i] > ys[i + 1]:
+            left_min = min(ys[:i + 1])
+            right_min = min(ys[i:])
+            prominence = ys[i] - max(left_min, right_min)
+            if prominence >= min_prominence * y_range:
+                px.append(xs[i])
+                py.append(ys[i])
+    return px, py
+
+
+def weighted_mean(ys: List[float], weights: List[float]) -> float:
+    """Weighted arithmetic mean."""
+    sw = sum(weights)
+    if sw < 1e-15:
+        return float("nan")
+    return sum(y * w for y, w in zip(ys, weights)) / sw
+
+
+def moving_std(ys: List[float], window: int) -> List[float]:
+    """Rolling standard deviation with given window size."""
+    n = len(ys)
+    out = []
+    for i in range(n):
+        lo = max(0, i - window // 2)
+        hi = min(n, lo + window)
+        seg = ys[lo:hi]
+        m = sum(seg) / len(seg)
+        out.append(math.sqrt(sum((v - m) ** 2 for v in seg) / len(seg)))
+    return out
+
+
+def _gaussian_fit(x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> Optional[List[float]]:
+    """Fit y = A·exp(-(x-μ)²/(2σ²)) + C using moment estimation."""
+    if len(x_pts) < 3:
+        return None
+    C = min(y_pts)
+    ys_c = [max(v - C, 1e-15) for v in y_pts]
+    total = sum(ys_c)
+    if total < 1e-15:
+        return None
+    mu = sum(x * y for x, y in zip(x_pts, ys_c)) / total
+    sigma2 = sum((x - mu) ** 2 * y for x, y in zip(x_pts, ys_c)) / total
+    sigma = math.sqrt(max(sigma2, 1e-15))
+    A = max(ys_c)
+    return [A * math.exp(-((xi - mu) ** 2) / (2 * sigma2)) + C for xi in x_eval]
+
+
+def _gaussian_formula(x_pts: List[float], y_pts: List[float]) -> str:
+    C = min(y_pts)
+    ys_c = [max(v - C, 1e-15) for v in y_pts]
+    total = sum(ys_c)
+    if total < 1e-15:
+        return ""
+    mu = sum(x * y for x, y in zip(x_pts, ys_c)) / total
+    sigma2 = sum((x - mu) ** 2 * y for x, y in zip(x_pts, ys_c)) / total
+    sigma = math.sqrt(max(sigma2, 1e-15))
+    A = max(ys_c)
+    return f"y = {fmt(A)}·exp(-(x-{fmt(mu)})²/(2·{fmt(sigma)}²)) + {fmt(C)}"
+
+
+def _logistic_fit(x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> Optional[List[float]]:
+    """Fit logistic/sigmoid y = L/(1+exp(-k(x-x0))) + C via bisection on k and x0."""
+    if len(x_pts) < 4:
+        return None
+    y_min, y_max = min(y_pts), max(y_pts)
+    L = y_max - y_min
+    C = y_min
+    if L < 1e-15:
+        return None
+    x0 = x_pts[len(x_pts) // 2]
+    span = x_pts[-1] - x_pts[0]
+    k = 4.0 / span if span > 0 else 1.0
+    for _ in range(60):
+        grad_k = sum(
+            -2 * (y_pts[i] - C - L / (1 + math.exp(-k * (x_pts[i] - x0)))) *
+            (L * (x_pts[i] - x0) * math.exp(-k * (x_pts[i] - x0)) /
+             (1 + math.exp(-k * (x_pts[i] - x0))) ** 2)
+            for i in range(len(x_pts))
+        )
+        grad_x0 = sum(
+            -2 * (y_pts[i] - C - L / (1 + math.exp(-k * (x_pts[i] - x0)))) *
+            (-L * k * math.exp(-k * (x_pts[i] - x0)) /
+             (1 + math.exp(-k * (x_pts[i] - x0))) ** 2)
+            for i in range(len(x_pts))
+        )
+        step = 1e-4 / (abs(grad_k) + abs(grad_x0) + 1e-15)
+        k -= step * grad_k
+        x0 -= step * grad_x0
+    return [C + L / (1 + math.exp(-k * (xi - x0))) for xi in x_eval]
+
+
+def _logistic_formula(x_pts: List[float], y_pts: List[float]) -> str:
+    y_min, y_max = min(y_pts), max(y_pts)
+    L = y_max - y_min
+    x0 = x_pts[len(x_pts) // 2]
+    span = x_pts[-1] - x_pts[0]
+    k = 4.0 / span if span > 0 else 1.0
+    return f"y = {fmt(L)}/(1+exp(-{fmt(k)}·(x-{fmt(x0)}))) + {fmt(y_min)}"
+
+
+def _double_exp_fit(x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> Optional[List[float]]:
+    """Fit y = a·exp(b·x) + c·exp(d·x) by splitting into two halves and combining."""
+    if len(x_pts) < 6:
+        return None
+    mid = len(x_pts) // 2
+    r1 = _exp_fit(x_pts[:mid], y_pts[:mid], x_eval)
+    r2 = _exp_fit(x_pts[mid:], y_pts[mid:], x_eval)
+    if r1 is None or r2 is None:
+        return None
+    residuals = [y_pts[i] - (r1[i] + r2[i]) / 2.0 for i in range(len(x_pts))]
+    _ = residuals
+    return [0.5 * (v1 + v2) for v1, v2 in zip(r1, r2)]
+
+
 def linspace(start: float, stop: float, n: int) -> List[float]:
     if n < 2:
         return [start]
@@ -509,6 +769,21 @@ def r_squared(xs: List[float], ys: List[float], fit_ys: List[float]) -> Optional
     return 1.0 - ss_res / ss_tot if ss_tot > 1e-15 else None
 
 
+def _fit_gaussian(x_pts, y_pts, x_eval):
+    r = _gaussian_fit(x_pts, y_pts, x_eval)
+    return r if r is not None else [0.0] * len(x_eval)
+
+
+def _fit_logistic(x_pts, y_pts, x_eval):
+    r = _logistic_fit(x_pts, y_pts, x_eval)
+    return r if r is not None else [0.0] * len(x_eval)
+
+
+def _fit_double_exp(x_pts, y_pts, x_eval):
+    r = _double_exp_fit(x_pts, y_pts, x_eval)
+    return r if r is not None else [0.0] * len(x_eval)
+
+
 _BUILTIN_MODES: List[FitMode] = [
     FitMode("linear_origin", "Linear (origin)",  _fit_linear_origin,     1,  _formula_linear_origin),
     FitMode("linear",        "Linear",            _fit_linear,             2,  _formula_linear),
@@ -523,6 +798,9 @@ _BUILTIN_MODES: List[FitMode] = [
     FitMode("log",           "Logarithmic",       _fit_log,                2,  _log_formula),
     FitMode("sine",          "Sinusoidal",        _sinusoidal_fit,         4),
     FitMode("moving_avg",    "Moving Average",    _moving_average_fit,     3),
+    FitMode("gaussian",      "Gaussian",          _fit_gaussian,           3,  _gaussian_formula),
+    FitMode("logistic",      "Logistic",          _fit_logistic,           4,  _logistic_formula),
+    FitMode("double_exp",    "Double Exponential",_fit_double_exp,         6),
 ]
 
 _REGISTRY: Dict[str, FitMode] = {m.key: m for m in _BUILTIN_MODES}

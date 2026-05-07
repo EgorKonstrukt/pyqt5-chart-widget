@@ -7,7 +7,7 @@ from PyQt5.QtCore import Qt, QRect, QRectF, QPointF
 from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont,
                           QFontMetrics, QPainterPath, QWheelEvent, QMouseEvent)
 from .canvas_base import (CanvasBase, _fmt_axis,
-                           _ML, _MT, _MR, _MB, _MR2,
+                           _ML, _MT, _MR, _MB, _MR2, _MT_TITLE,
                            _COORD_CLAMP, _DECIMATE_THRESHOLD, _SCREEN_Y_CLAMP,
                            _RANGE_SEL_ALPHA, _RUBBERBAND_MIN_PX,
                            _SNAP_RADIUS_PX, _SNAP_DOT_R, _TANGENT_HALF_FRAC,
@@ -137,6 +137,17 @@ class _PlotCanvas(CanvasBase, QWidget):
         gr_col_major = QColor(fg); gr_col_major.setAlpha(60)
         lb_col = QColor(fg); lb_col.setAlpha(255)
         p.fillRect(self.rect(), bg)
+        if c.label_title:
+            tf = c.title_font or QFont(c.font.family(), c.font.pointSize() + 3, QFont.Weight.Bold)
+            p.setFont(tf)
+            tfm = QFontMetrics(tf)
+            lw = tfm.horizontalAdvance(c.label_title)
+            tx = (self.width() - lw) // 2
+            ty = tfm.ascent() + 3
+            title_col = QColor(fg)
+            p.setPen(title_col)
+            p.drawText(tx, ty, c.label_title)
+            p.setFont(c.font)
         pr = self._plot_rect()
         x0, x1, y0, y1, dx, dy = self._view_params(pr)
         log_x, log_y = c.log_x, c.log_y
