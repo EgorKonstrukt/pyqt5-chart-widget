@@ -25,11 +25,12 @@ class ChartWidget(QWidget):
                  show_legend: bool = False,
                  show_sidebar: bool = False,
                  font: Optional[QFont] = None,
-                 anim_duration: int = 150,
+                 anim_duration: int = 450,
                  anim_easing: QEasingCurve.Type = QEasingCurve.Type.OutQuint,
                  threaded_fit: bool = False,
                  grid_px_x: int = 80,
-                 grid_px_y: int = 60):
+                 grid_px_y: int = 60,
+                 origin_axes: bool = False,):
         super().__init__(parent)
         self._lines: List[_LineItem] = []
         self._scatters: List[_ScatterItem] = []
@@ -66,6 +67,7 @@ class ChartWidget(QWidget):
                 "make_canvas() returned None — check that pyqt5_chart_widget/canvas.py "
                 "exists and that _PlotCanvas can be imported from it."
             )
+        self._canvas._show_origin_axes = origin_axes
         self._toolbar_layout = self._build_toolbar()
         self._toolbar_widget = QWidget(self)
         self._toolbar_widget.setLayout(self._toolbar_layout)
@@ -133,6 +135,18 @@ class ChartWidget(QWidget):
             False,
             self.setLatestPointVisible,
         )
+        self._btn_origin_axes = self._make_toggle_btn(
+            "chart_widget.btn_origin_axes",
+            "chart_widget.btn_origin_axes_tip",
+            False,
+            self.setOriginAxesVisible,
+        )
+        self._btn_crosshair = self._make_toggle_btn(
+            "chart_widget.btn_crosshair",
+            "chart_widget.btn_crosshair_tip",
+            True,
+            self.setCrosshairVisible,
+        )
         self._btn_fit = self._make_btn("SP_FileDialogContentsView",
                                        "chart_widget.btn_fit",
                                        "chart_widget.btn_fit_tip",
@@ -155,6 +169,9 @@ class ChartWidget(QWidget):
         self._btn_fit_mode.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._btn_fit_mode.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self._fit_menu = QMenu(self._btn_fit_mode)
+        none_act = QAction("None", self)
+        none_act.triggered.connect(lambda: self._on_fit_mode_selected(None))
+        self._fit_menu.addAction(none_act)
         for mode in get_fit_modes():
             act = QAction(mode.label, self)
             act.setData(mode.key)
@@ -167,16 +184,18 @@ class ChartWidget(QWidget):
         tb.setSpacing(2)
         tb.addStretch()
         for w in (self._btn_autofit_toggle, self._btn_latest_toggle,
+                  self._btn_origin_axes, self._btn_crosshair,
                   self._btn_fit, self._btn_stats, self._btn_fit_mode,
                   self._btn_csv, self._btn_img):
             tb.addWidget(w)
         return tb
 
-    def _on_fit_mode_selected(self, key: str):
+    def _on_fit_mode_selected(self, key: Optional[str]):
         self._active_fit_key = key
         self._update_fit_mode_label()
         for fit in self._fits:
-            fit.setModeKey(key)
+            if key is not None:
+                fit.setModeKey(key)
         self._canvas.update()
 
     def _update_fit_mode_label(self):
@@ -218,6 +237,16 @@ class ChartWidget(QWidget):
         self._canvas._show_latest = visible
         self._canvas.update()
 
+    def setOriginAxesVisible(self, visible: bool):
+        """Enable or disable calculator-style axes through the origin."""
+        self._canvas._show_origin_axes = visible
+        self._canvas.update()
+
+    def setCrosshairVisible(self, visible: bool):
+        """Enable or disable the crosshair cursor overlay."""
+        self._canvas._crosshair_enabled = visible
+        self._canvas.update()
+
     def setThreadedFit(self, threaded: bool):
         self._threaded_fit = threaded
 
@@ -242,6 +271,21 @@ class ChartWidget(QWidget):
 
     def clearRangeSelection(self):
         self._canvas.clearRangeSelection()
+
+    def setSnapToData(self, enabled: bool):
+        """Enable or disable snapping the crosshair to the nearest data point."""
+        self._canvas._snap_to_data = enabled
+        self._canvas.update()
+
+    def setShowDataDots(self, enabled: bool):
+        """Show or hide small dots at every data point on line series."""
+        self._canvas._show_dots = enabled
+        self._canvas.update()
+
+    def setShowTangent(self, enabled: bool):
+        """Show or hide the tangent line on the crosshair."""
+        self._canvas._show_tangent = enabled
+        self._canvas.update()
 
     def plot(self, color: Optional[str] = None, width: int = 2,
              label: str = "", dashed: bool = False,
@@ -301,37 +345,10 @@ class ChartWidget(QWidget):
                     dashed: bool = False, label: str = "",
                     resolution: float = 1.5) -> _FunctionItem:
         """
-        Add a function plot item that evaluates ``fn`` over the visible x-range
-        on every repaint.
+        Add a function plot item that evaluates fn over the visible x-range on every repaint.
 
-        The callable signature is::
-
-            fn(xs: List[float]) -> List[float | None]
-
-        Values that are None, NaN or ±inf produce gaps in the curve so that
-        discontinuous functions (tan, 1/x, etc.) render correctly.
-
-        Parameters
-        ----------
-        fn:
-            Callable accepting a list of x values and returning a list of the
-            same length.
-        color:
-            Hex colour string.  Auto-assigned from the palette if omitted.
-        width:
-            Pen width in pixels.
-        dashed:
-            Draw the curve with a dashed line style.
-        label:
-            Legend label.
-        resolution:
-            Sample points per pixel of plot width.  Default 1.5.
-
-        Returns
-        -------
-        _FunctionItem
-            The newly created item.  Call ``item.setFunction(fn)`` to swap the
-            function later, ``item.setVisible(False)`` to hide it, etc.
+        fn signature: fn(xs: List[float]) -> List[float | None].
+        None / NaN / ±inf values produce gaps so discontinuous functions render correctly.
         """
         c = color or next_line_color()
         pen = QPen(QColor(c), width,
@@ -347,34 +364,11 @@ class ChartWidget(QWidget):
                  color: str = "#e74c3c", width: int = 2,
                  handle_radius: int = 6) -> _RulerItem:
         """
-        Add an interactive measurement ruler to the chart.
+        Add an interactive measurement ruler.
 
-        The ruler is drawn as a line segment with circular drag handles at
-        each endpoint.  A tooltip above the midpoint shows the Euclidean
-        distance, dx and dy in data coordinates.
-
-        The ruler is hidden by default; call ``ruler.setVisible(True)`` to
-        show it.  Endpoints can be dragged by the user when the ruler is
-        visible and ``ruler.draggable`` is True.
-
-        Parameters
-        ----------
-        x0, y0:
-            Initial position of the first endpoint in data coordinates.
-        x1, y1:
-            Initial position of the second endpoint in data coordinates.
-        color:
-            Hex colour string for the ruler line and handles.
-        width:
-            Pen width in pixels.
-        handle_radius:
-            Pixel radius of the circular drag handles.
-
-        Returns
-        -------
-        _RulerItem
-            The newly created ruler.  Connect ``ruler.changed`` to a callable
-            to be notified whenever either endpoint moves.
+        The ruler is hidden by default; call ruler.setVisible(True) to show it.
+        Endpoints can be dragged interactively. The midpoint label shows distance,
+        dx, dy, and angle in degrees.
         """
         pen = QPen(QColor(color), width)
         ruler = _RulerItem(self, pen, handle_radius)
@@ -383,17 +377,7 @@ class ChartWidget(QWidget):
         return ruler
 
     def onViewportChanged(self, callback) -> None:
-        """
-        Register a callback that is invoked whenever the visible viewport
-        changes (pan, zoom, autofit, rubberband zoom).
-
-        The callback receives four positional arguments::
-
-            callback(x0: float, x1: float, y0: float, y1: float)
-
-        Multiple callbacks may be registered.  Use
-        ``removeViewportChangedCallback`` to deregister.
-        """
+        """Register a callback invoked whenever the visible viewport changes."""
         if callback not in self._viewport_changed_callbacks:
             self._viewport_changed_callbacks.append(callback)
 
@@ -426,13 +410,7 @@ class ChartWidget(QWidget):
 
     @property
     def viewport(self):
-        """
-        Current viewport as a named-tuple-like object with fields
-        x0, x1, y0, y1.
-
-        This is a lightweight read-only snapshot; it does not update
-        automatically.  Subscribe to ``onViewportChanged`` for live updates.
-        """
+        """Current viewport as a read-only snapshot with fields x0, x1, y0, y1."""
         class _VP:
             __slots__ = ("x0", "x1", "y0", "y1")
             def __init__(self, x0, x1, y0, y1):
@@ -447,15 +425,8 @@ class ChartWidget(QWidget):
         """
         Programmatically set the visible data range.
 
-        Parameters
-        ----------
-        x0, x1:
-            Left and right data-space bounds.
-        y0, y1:
-            Bottom and top data-space bounds.
-        animated:
-            If True, the transition is animated using the configured easing
-            and duration.  If False, the view snaps immediately.
+        Parameters x0, x1 are the horizontal bounds; y0, y1 are the vertical bounds.
+        When animated=True the transition uses the configured easing and duration.
         """
         self._autofit_timer.stop()
         if animated:
@@ -578,6 +549,9 @@ class ChartWidget(QWidget):
 
     def refreshFitMenu(self):
         self._fit_menu.clear()
+        none_act = QAction("None", self)
+        none_act.triggered.connect(lambda: self._on_fit_mode_selected(None))
+        self._fit_menu.addAction(none_act)
         for mode in get_fit_modes():
             act = QAction(mode.label, self)
             act.setData(mode.key)

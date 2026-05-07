@@ -133,7 +133,8 @@ class _PlotCanvas(CanvasBase, QWidget):
         bg = pal.window().color()
         fg = pal.windowText().color()
         ax_col = QColor(fg); ax_col.setAlpha(80)
-        gr_col = QColor(fg); gr_col.setAlpha(80)
+        gr_col = QColor(fg); gr_col.setAlpha(30)
+        gr_col_major = QColor(fg); gr_col_major.setAlpha(60)
         lb_col = QColor(fg); lb_col.setAlpha(255)
         p.fillRect(self.rect(), bg)
         pr = self._plot_rect()
@@ -167,6 +168,8 @@ class _PlotCanvas(CanvasBase, QWidget):
         for tv in yt_screen:
             sy = int(pr.bottom() - (tv - y0) / dy * pr.height())
             p.drawLine(pr.left(), sy, pr.right(), sy)
+        if self._show_origin_axes:
+            self._paint_origin_axes(p, pr, x0, dx, y0, dy, fg)
         p.setPen(QPen(ax_col, 1))
         p.drawRect(pr)
         p.setPen(lb_col)
@@ -174,11 +177,19 @@ class _PlotCanvas(CanvasBase, QWidget):
             sx = int(pr.left() + (ts - x0) / dx * pr.width())
             lbl = _fmt_axis(tv)
             lw = fm.horizontalAdvance(lbl)
+            tick_len = 5
+            p.setPen(QPen(ax_col, 1))
+            p.drawLine(sx, pr.bottom(), sx, pr.bottom() + tick_len)
+            p.setPen(lb_col)
             p.drawText(sx - lw // 2, pr.bottom() + fm.height() + 2, lbl)
         for tv, ts in zip(yt, yt_screen):
             sy = int(pr.bottom() - (ts - y0) / dy * pr.height())
             lbl = _fmt_axis(tv)
             lw = fm.horizontalAdvance(lbl)
+            tick_len = 5
+            p.setPen(QPen(ax_col, 1))
+            p.drawLine(pr.left() - tick_len, sy, pr.left(), sy)
+            p.setPen(lb_col)
             p.drawText(pr.left() - lw - 6, sy + fm.ascent() // 2, lbl)
         if has_r2:
             y0r = to_log(c.vy0_r) if c.log_y else c.vy0_r
@@ -376,6 +387,8 @@ class _PlotCanvas(CanvasBase, QWidget):
             p.setPen(item.pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
+        if self._show_dots:
+            self._paint_data_dots(p, pr, x0, dx, y0, dy)
         all_scatters = list(c.scatters) + list(c.scatters_r2)
         for item in all_scatters:
             if not item.visible or not item.raw_visible or not item.xs:
@@ -397,8 +410,10 @@ class _PlotCanvas(CanvasBase, QWidget):
                     pt_top = self._to_pt_log(xi, yi + ey, x0, dx, y0_eff, dy_eff, pr, log_x, log_y)
                     pt_bot = self._to_pt_log(xi, yi - ey, x0, dx, y0_eff, dy_eff, pr, log_x, log_y)
                     p.drawLine(pt_bot, pt_top)
-                    p.drawLine(int(pt_top.x()) - cap_px, int(pt_top.y()), int(pt_top.x()) + cap_px, int(pt_top.y()))
-                    p.drawLine(int(pt_bot.x()) - cap_px, int(pt_bot.y()), int(pt_bot.x()) + cap_px, int(pt_bot.y()))
+                    p.drawLine(int(pt_top.x()) - cap_px, int(pt_top.y()),
+                               int(pt_top.x()) + cap_px, int(pt_top.y()))
+                    p.drawLine(int(pt_bot.x()) - cap_px, int(pt_bot.y()),
+                               int(pt_bot.x()) + cap_px, int(pt_bot.y()))
             if item.error_xs is not None:
                 err_pen = QPen(item.color.darker(150), 1)
                 p.setPen(err_pen)
@@ -410,8 +425,10 @@ class _PlotCanvas(CanvasBase, QWidget):
                     pt_l = self._to_pt_log(xi - ex, yi, x0, dx, y0_eff, dy_eff, pr, log_x, log_y)
                     pt_r = self._to_pt_log(xi + ex, yi, x0, dx, y0_eff, dy_eff, pr, log_x, log_y)
                     p.drawLine(pt_l, pt_r)
-                    p.drawLine(int(pt_l.x()), int(pt_l.y()) - cap_px, int(pt_l.x()), int(pt_l.y()) + cap_px)
-                    p.drawLine(int(pt_r.x()), int(pt_r.y()) - cap_px, int(pt_r.x()), int(pt_r.y()) + cap_px)
+                    p.drawLine(int(pt_l.x()), int(pt_l.y()) - cap_px,
+                               int(pt_l.x()), int(pt_l.y()) + cap_px)
+                    p.drawLine(int(pt_r.x()), int(pt_r.y()) - cap_px,
+                               int(pt_r.x()), int(pt_r.y()) + cap_px)
             r = item.size / 2.0
             for i, (xi, yi) in enumerate(zip(dxs, dys)):
                 pt = self._to_pt_log(xi, yi, x0, dx, y0_eff, dy_eff, pr, log_x, log_y)
@@ -436,7 +453,7 @@ class _PlotCanvas(CanvasBase, QWidget):
                         continue
                     pt = self._to_pt_log(xi, yi, x0, dx, y0_eff, dy_eff, pr, log_x, log_y)
                     p.drawText(int(pt.x()) + int(item.size / 2) + 2, int(pt.y()) - 2, ann)
-        if self._mouse_pos is not None and not self._rb_active:
+        if self._crosshair_enabled and self._mouse_pos is not None and not self._rb_active:
             self._paint_crosshair(p, pr, x0, dx, y0, dy, fg, bg, fm)
         if self._rb_active and self._rb_start and self._rb_end:
             rb = QRectF(self._rb_start, self._rb_end).normalized()
@@ -469,19 +486,22 @@ class _PlotCanvas(CanvasBase, QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawLine(int(mp.x()), pr.top(), int(mp.x()), pr.bottom())
             p.drawLine(pr.left(), int(mp.y()), pr.right(), int(mp.y()))
+            xv, yv = self._screen_to_data(mp.x(), mp.y(), x0, dx, y0, dy, pr, c.log_x, c.log_y)
+            self._paint_crosshair_axis_labels(p, pr, xv, yv, mp, fm, fg, bg)
             return
         xi, yi, _, item = nearest
         snap = self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, c.log_x, c.log_y)
         self._paint_crosshair_lines(p, pr, snap, fg)
         self._paint_snap_dot(p, snap, fg)
-        slope = self._tangent_slope(item, xi)
-        if slope is not None:
-            half = (c.vx1 - c.vx0) * _TANGENT_HALF_FRAC
-            tp0 = self._to_pt_log(xi - half, yi - slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
-            tp1 = self._to_pt_log(xi + half, yi + slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
-            tg_col = QColor(fg); tg_col.setAlpha(140)
-            p.setPen(QPen(tg_col, 1, Qt.PenStyle.DotLine))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawLine(tp0, tp1)
-        self._paint_tooltip(p, pr, xi, yi, snap, fg, bg, fm)
+        if self._show_tangent:
+            slope = self._tangent_slope(item, xi)
+            if slope is not None:
+                half = (c.vx1 - c.vx0) * _TANGENT_HALF_FRAC
+                tp0 = self._to_pt_log(xi - half, yi - slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
+                tp1 = self._to_pt_log(xi + half, yi + slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
+                tg_col = QColor(fg); tg_col.setAlpha(140)
+                p.setPen(QPen(tg_col, 1, Qt.PenStyle.DotLine))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawLine(tp0, tp1)
+        self._paint_tooltip(p, pr, xi, yi, snap, fg, bg, fm, item)
         self._paint_crosshair_axis_labels(p, pr, xi, yi, snap, fm, fg, bg)

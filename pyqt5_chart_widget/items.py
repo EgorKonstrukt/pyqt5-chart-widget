@@ -22,6 +22,7 @@ class _InfLine:
         self.pen = pen
         self.visible = False
         self.draggable = True
+        self.label: str = ""
 
     def setValue(self, v: float):
         self.value = v
@@ -33,6 +34,10 @@ class _InfLine:
 
     def setDraggable(self, v: bool):
         self.draggable = v
+
+    def setLabel(self, label: str):
+        self.label = label
+        self._chart.update()
 
 
 class _LineItem:
@@ -47,10 +52,18 @@ class _LineItem:
         self.fill_under = False
         self.fill_alpha = 40
         self.step_mode = False
+        self.point_symbol: str = "none"
+        self.point_size: int = 6
 
     def setData(self, xs=None, ys=None):
         self.xs = list(xs) if xs is not None else []
         self.ys = list(ys) if ys is not None else []
+        self._chart._schedule_autofit()
+
+    def appendPoint(self, x: float, y: float):
+        """Append a single point without full data reload."""
+        self.xs.append(x)
+        self.ys.append(y)
         self._chart._schedule_autofit()
 
     def setVisible(self, v: bool):
@@ -74,6 +87,33 @@ class _LineItem:
         self.step_mode = enabled
         self._chart.update()
 
+    def setPointSymbol(self, symbol: str, size: int = 6):
+        """Set marker symbol on line nodes: 'none', 'circle', 'square', 'cross'."""
+        self.point_symbol = symbol
+        self.point_size = size
+        self._chart.update()
+
+    def setPen(self, pen: QPen):
+        self.pen = pen
+        self._chart.update()
+
+    @property
+    def x_range(self) -> Optional[Tuple[float, float]]:
+        if not self.xs:
+            return None
+        return (min(self.xs), max(self.xs))
+
+    @property
+    def y_range(self) -> Optional[Tuple[float, float]]:
+        if not self.ys:
+            return None
+        return (min(self.ys), max(self.ys))
+
+    def clear(self):
+        self.xs = []
+        self.ys = []
+        self._chart._schedule_autofit()
+
 
 class _ScatterItem(QObject):
     point_clicked = pyqtSignal(float, float, int)
@@ -92,11 +132,18 @@ class _ScatterItem(QObject):
         self.error_ys: Optional[List[float]] = None
         self.annotations: Optional[List[str]] = None
         self.selected_idx: Optional[int] = None
+        self.symbol: str = "circle"
 
     def setData(self, x=None, y=None, **_):
         self.xs = list(x) if x is not None else []
         self.ys = list(y) if y is not None else []
         self.selected_idx = None
+        self._chart._schedule_autofit()
+
+    def appendPoint(self, x: float, y: float):
+        """Append a single point without full data reload."""
+        self.xs.append(x)
+        self.ys.append(y)
         self._chart._schedule_autofit()
 
     def setVisible(self, v: bool):
@@ -124,6 +171,37 @@ class _ScatterItem(QObject):
     def selectPoint(self, idx: Optional[int]):
         self.selected_idx = idx
         self._chart.update()
+
+    def setSymbol(self, symbol: str):
+        """Set point shape: 'circle', 'square', 'triangle', 'cross', 'diamond'."""
+        self.symbol = symbol
+        self._chart.update()
+
+    def setColor(self, color: QColor):
+        self.color = color
+        self._chart.update()
+
+    def setSize(self, size: int):
+        self.size = size
+        self._chart.update()
+
+    def clear(self):
+        self.xs = []
+        self.ys = []
+        self.selected_idx = None
+        self._chart._schedule_autofit()
+
+    @property
+    def x_range(self) -> Optional[Tuple[float, float]]:
+        if not self.xs:
+            return None
+        return (min(self.xs), max(self.xs))
+
+    @property
+    def y_range(self) -> Optional[Tuple[float, float]]:
+        if not self.ys:
+            return None
+        return (min(self.ys), max(self.ys))
 
 
 def _screen_decimate(xs, ys, x_lo: float, x_hi: float,
@@ -161,32 +239,10 @@ def _screen_decimate(xs, ys, x_lo: float, x_hi: float,
 
 class _FunctionItem:
     """
-    A plot item that evaluates a callable over the visible x-range on every
-    repaint, producing a smooth curve that follows the viewport regardless of
-    zoom level or pan position.
+    A plot item that evaluates a callable over the visible x-range on every repaint.
 
-    The callable signature is::
-
-        fn(xs: List[float]) -> List[float | None]
-
-    Values that are None, NaN or ±inf are treated as discontinuities and cause
-    a gap in the rendered polyline, so functions like tan(x) or 1/x render
-    correctly near their poles.
-
-    Parameters
-    ----------
-    chart:
-        Parent ChartWidget.
-    fn:
-        Callable accepting a list of x values and returning a list of the same
-        length.  Each element may be float or None.
-    pen:
-        QPen used to draw the curve.
-    label:
-        Legend label.
-    resolution:
-        Sample points per pixel of plot width.  Higher values produce smoother
-        curves; 1.5 is a sensible default.
+    The callable signature is: fn(xs: List[float]) -> List[float | None].
+    Values that are None, NaN or ±inf produce gaps in the rendered polyline.
     """
 
     def __init__(self, chart: "ChartWidget", fn: Callable[[List[float]], List[float]],
@@ -290,11 +346,12 @@ class _FunctionItem:
         self.fill_alpha = alpha
         self._chart.update()
 
+    def setPen(self, pen: QPen):
+        self.pen = pen
+        self._chart.update()
+
     def setResolution(self, resolution: float):
-        """
-        Set the number of sample points per pixel of plot width.  Values
-        between 1.0 and 4.0 are typical; higher values cost more CPU.
-        """
+        """Set the number of sample points per pixel of plot width (1.0–4.0 typical)."""
         self.resolution = max(0.1, resolution)
         self.invalidateCache()
         self._chart.update()
@@ -302,26 +359,11 @@ class _FunctionItem:
 
 class _RulerItem:
     """
-    An interactive two-endpoint measurement ruler drawn as an overlay on the
-    canvas.
+    An interactive two-endpoint measurement ruler drawn as an overlay.
 
-    The ruler reports the Euclidean distance between its two endpoints in
-    data-space coordinates.  Both endpoints can be dragged interactively by
-    the user when the ruler is visible and ``draggable`` is True.
-
-    An optional ``changed`` callback is called whenever either endpoint moves.
-
-    The ruler is purely a display overlay — it is not included in autofit
-    bounds, analytics panels, legend or CSV exports.
-
-    Parameters
-    ----------
-    chart:
-        Parent ChartWidget.
-    pen:
-        QPen used to draw the ruler line and endpoints.
-    handle_radius:
-        Pixel radius of the circular drag handles at each endpoint.
+    Reports Euclidean distance, dx, dy, and angle between its two endpoints.
+    Both endpoints can be dragged interactively when draggable is True.
+    An optional changed callback is called whenever either endpoint moves.
     """
 
     def __init__(self, chart: "ChartWidget", pen: QPen, handle_radius: int = 6):
@@ -356,10 +398,13 @@ class _RulerItem:
         """Angle of the ruler relative to the positive x-axis, in degrees."""
         return math.degrees(math.atan2(self.y1 - self.y0, self.x1 - self.x0))
 
+    @property
+    def midpoint(self) -> Tuple[float, float]:
+        """Midpoint of the ruler in data coordinates."""
+        return ((self.x0 + self.x1) / 2.0, (self.y0 + self.y1) / 2.0)
+
     def setPoints(self, x0: float, y0: float, x1: float, y1: float):
-        """
-        Set both endpoints simultaneously.  Fires ``changed`` and repaints.
-        """
+        """Set both endpoints simultaneously, fire changed callback, and repaint."""
         self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
         if self.changed is not None:
             self.changed()
@@ -487,6 +532,14 @@ class _FitItem:
         if mode is None or not self.source.xs:
             return ""
         return mode.formula(list(self.source.xs), list(self.source.ys))
+
+    def getRSquared(self) -> Optional[float]:
+        """Return R² coefficient of determination for the current fit."""
+        from .math_utils import get_fit_mode, r_squared
+        mode = get_fit_mode(self.mode_key)
+        if mode is None or not self.source.xs or len(self._xs) < 2:
+            return None
+        return r_squared(list(self._xs), self._ys, self._ys)
 
     def asDict(self, x_lo: Optional[float] = None, x_hi: Optional[float] = None,
                n_pts: int = 400) -> dict:

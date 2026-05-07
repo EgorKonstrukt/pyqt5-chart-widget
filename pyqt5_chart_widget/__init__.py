@@ -25,4 +25,4 @@ __all__ = [
     "set_tr",
     "update_strings",
 ]
-__version__ = "5.1.0"
+__version__ = "6.0.0"

@@ -43,7 +43,8 @@ from .canvas_base import (CanvasBase, _fmt_axis,
                            _SNAP_DOT_R, _TANGENT_HALF_FRAC,
                            _ANALYTICS_PAD, _ANALYTICS_ROW_H, _ANALYTICS_MAX_SERIES,
                            _TOOLTIP_MARGIN, _LEGEND_PAD, _LEGEND_SWATCH,
-                           _LATEST_TAG_PAD, _LATEST_TAG_ROUND)
+                           _LATEST_TAG_PAD, _LATEST_TAG_ROUND,
+                           _ORIGIN_AXIS_ALPHA)
 from .math_utils import (nice_ticks, nice_log_ticks, to_log, decimated,
                          fmt, get_fit_modes, trapezoid_integral)
 from .items import _LineItem, _ScatterItem, _FitItem, _InfLine, _FunctionItem, _RulerItem
@@ -227,7 +228,7 @@ class _GLRenderer:
         self._buf = _GpuBuffer()
         self._tex_buf = _GpuBuffer()
         self._text_textures: dict = {}
-        self._uloc: dict[int, dict[str, int]] = {}
+        self._uloc: dict = {}
         self._last_prog = -1
         self._last_style = Qt.PenStyle.SolidLine
 
@@ -432,6 +433,66 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
         gpos = QCursor.pos()
         QTimer.singleShot(0, lambda: menu.exec_(gpos))
 
+    def _draw_origin_axes_gl(self, pr, x0, dx, y0, dy, fg_gl,
+                              xt, xt_screen, yt, yt_screen, log_x, log_y,
+                              pl_f, pb_f, pw_f, ph_f):
+        """Draw calculator-style axes through origin in GL layer."""
+        c = self._chart
+        ax_alpha = _ORIGIN_AXIS_ALPHA / 255.0
+        ax_col = (*fg_gl[:3], ax_alpha)
+        tick_col = (*fg_gl[:3], ax_alpha * 0.75)
+        tick_len = 4.0
+        origin_x_screen = pl_f + (0.0 - x0) / dx * pw_f if not log_x else None
+        origin_y_screen = pb_f - (0.0 - y0) / dy * ph_f if not log_y else None
+        if origin_x_screen is not None and pr.left() <= origin_x_screen <= pr.right():
+            sx = origin_x_screen
+            self._renderer.draw_lines(
+                np.array([[sx, pr.top()], [sx, pr.bottom()]], dtype=np.float32),
+                ax_col, 1.5,
+            )
+            tick_pts = []
+            for tv, ts in zip(yt, yt_screen):
+                sy = pb_f - (ts - y0) / dy * ph_f
+                if pr.top() <= sy <= pr.bottom() and abs(tv) > 1e-12:
+                    tick_pts.extend([[sx - tick_len, sy], [sx + tick_len, sy]])
+            if tick_pts:
+                self._renderer.draw_lines(
+                    np.array(tick_pts, dtype=np.float32), tick_col, 1.0,
+                )
+        if origin_y_screen is not None and pr.top() <= origin_y_screen <= pr.bottom():
+            sy = origin_y_screen
+            self._renderer.draw_lines(
+                np.array([[pr.left(), sy], [pr.right(), sy]], dtype=np.float32),
+                ax_col, 1.5,
+            )
+            tick_pts = []
+            for tv, ts in zip(xt, xt_screen):
+                sx = pl_f + (ts - x0) / dx * pw_f
+                if pr.left() <= sx <= pr.right() and abs(tv) > 1e-12:
+                    tick_pts.extend([[sx, sy - tick_len], [sx, sy + tick_len]])
+            if tick_pts:
+                self._renderer.draw_lines(
+                    np.array(tick_pts, dtype=np.float32), tick_col, 1.0,
+                )
+        if (origin_x_screen is not None and pr.left() <= origin_x_screen <= pr.right() and
+                origin_y_screen is not None and pr.top() <= origin_y_screen <= pr.bottom()):
+            self._renderer.draw_circle_fill(
+                origin_x_screen, origin_y_screen, 3.0, (*fg_gl[:3], 0.8),
+            )
+
+    def _draw_data_dots_gl(self, pr, x0, dx, y0, dy, log_x, log_y,
+                            pl_f, pb_f, pw_f, ph_f):
+        """Draw small dots at every line-series data point in GL layer."""
+        c = self._chart
+        for item in c.lines:
+            if not item.visible or not item.xs:
+                continue
+            pts = _log_pts_to_screen(
+                item.xs, item.ys, x0, dx, y0, dy, pl_f, pb_f, pw_f, ph_f, log_x, log_y,
+            )
+            col = _qcolor_to_gl(item.pen.color())
+            self._renderer.draw_dots(pts, col, 4.0)
+
     def paintGL(self):
         if self._renderer is None:
             return
@@ -464,7 +525,7 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
         xt_screen = [to_log(v) for v in xt] if log_x else xt
         yt = nice_log_ticks(10 ** y0, 10 ** y1) if log_y else nice_ticks(y0, y1, n_y)
         yt_screen = [to_log(v) for v in yt] if log_y else yt
-        gr_col = (*fg_gl[:3], 0.18)
+        gr_col = (*fg_gl[:3], 0.12)
         pw_f, ph_f = float(pr.width()), float(pr.height())
         pl_f, pb_f = float(pr.left()), float(pr.bottom())
         n_gl = len(xt_screen) + len(yt_screen)
@@ -482,6 +543,15 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
                 grid_arr[idx + 1] = [pr.right(), sy]
                 idx += 2
             self._renderer.draw_lines(grid_arr, gr_col, 1.0)
+        if self._show_origin_axes:
+            glEnable(GL_SCISSOR_TEST)
+            glScissor(pr.left(), h - pr.bottom() - 1, pr.width(), pr.height() + 1)
+            self._draw_origin_axes_gl(
+                pr, x0, dx, y0, dy, fg_gl,
+                xt, xt_screen, yt, yt_screen, log_x, log_y,
+                pl_f, pb_f, pw_f, ph_f,
+            )
+            glDisable(GL_SCISSOR_TEST)
         ax_col = (*fg_gl[:3], 0.32)
         self._renderer.draw_rect_outline(pr.left(), pr.top(), pr.width(), pr.height(), ax_col, 1.0)
         if self._range_sel_x is not None:
@@ -508,13 +578,17 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
             if ln.horizontal:
                 ly = to_log(ln.value) if log_y else ln.value
                 sy = pb - (ly - y0) / dy * ph
-                self._renderer.draw_lines(np.array([[pl, sy], [pl + pw, sy]], dtype=np.float32), lc,
-                                          ln.pen.widthF() or 1.0, ln.pen.style())
+                self._renderer.draw_lines(
+                    np.array([[pl, sy], [pl + pw, sy]], dtype=np.float32),
+                    lc, ln.pen.widthF() or 1.0, ln.pen.style(),
+                )
             else:
                 lx = to_log(ln.value) if log_x else ln.value
                 sx = pl + (lx - x0) / dx * pw
-                self._renderer.draw_lines(np.array([[sx, pr.top()], [sx, pb]], dtype=np.float32), lc,
-                                          ln.pen.widthF() or 1.0, ln.pen.style())
+                self._renderer.draw_lines(
+                    np.array([[sx, pr.top()], [sx, pb]], dtype=np.float32),
+                    lc, ln.pen.widthF() or 1.0, ln.pen.style(),
+                )
         x_lo = min(c.vx0, c.vx1)
         x_hi = max(c.vx0, c.vx1)
         x_lo_fn = x_lo - (x_hi - x_lo) * 0.05
@@ -555,6 +629,8 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
                 fill_col = (*lc[:3], item.fill_alpha / 255.0)
                 self._renderer.draw_fill_under(pts, baseline_y, fill_col)
             self._renderer.draw_polyline(pts, lc, lw, item.pen.style())
+        if self._show_dots:
+            self._draw_data_dots_gl(pr, x0, dx, y0, dy, log_x, log_y, pl, pb, pw, ph)
         for item in c.lines_r2:
             if not item.visible or not item.raw_visible or len(item.xs) < 2:
                 continue
@@ -580,7 +656,7 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
             ic = _qcolor_to_gl(item.color)
             self._renderer.draw_circles_batch(pts, r, ic, sel_idx=item.selected_idx)
         glDisable(GL_SCISSOR_TEST)
-        if self._mouse_pos is not None and not self._rb_active:
+        if self._crosshair_enabled and self._mouse_pos is not None and not self._rb_active:
             self._paint_crosshair_gl(pr, x0, dx, y0, dy, fg_gl, bg_gl)
         if self._rb_active and self._rb_start and self._rb_end:
             rb = QRectF(self._rb_start, self._rb_end).normalized()
@@ -594,22 +670,32 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
         fm = QFontMetrics(c.font)
         p.setFont(c.font)
         lb_col = QColor(fg); lb_col.setAlpha(255)
+        ax_col_qt = QColor(fg); ax_col_qt.setAlpha(80)
         p.setPen(lb_col)
         for tv, ts in zip(xt, xt_screen):
             sx = int(pr.left() + (ts - x0) / dx * pr.width())
             lbl = _fmt_axis(tv)
             lw_txt = fm.horizontalAdvance(lbl)
+            tick_len = 5
+            p.setPen(QPen(ax_col_qt, 1))
+            p.drawLine(sx, pr.bottom(), sx, pr.bottom() + tick_len)
+            p.setPen(lb_col)
             p.drawText(sx - lw_txt // 2, pr.bottom() + fm.height() + 2, lbl)
         for tv, ts in zip(yt, yt_screen):
             sy = int(pr.bottom() - (ts - y0) / dy * pr.height())
             lbl = _fmt_axis(tv)
             lw_txt = fm.horizontalAdvance(lbl)
+            tick_len = 5
+            p.setPen(QPen(ax_col_qt, 1))
+            p.drawLine(pr.left() - tick_len, sy, pr.left(), sy)
+            p.setPen(lb_col)
             p.drawText(pr.left() - lw_txt - 6, sy + fm.ascent() // 2, lbl)
         if self._has_right_axis():
             y0r = to_log(c.vy0_r) if c.log_y else c.vy0_r
             y1r = to_log(c.vy1_r) if c.log_y else c.vy1_r
             dyr = y1r - y0r if abs(y1r - y0r) > 1e-300 else 1.0
-            ytr = nice_log_ticks(10 ** y0r, 10 ** y1r) if log_y else nice_ticks(y0r, y1r, max(2, pr.height() // max(1, c.grid_px_y)))
+            ytr = (nice_log_ticks(10 ** y0r, 10 ** y1r) if log_y
+                   else nice_ticks(y0r, y1r, max(2, pr.height() // max(1, c.grid_px_y))))
             ytr_screen = [to_log(v) for v in ytr] if log_y else ytr
             r2_col = QColor(fg); r2_col.setAlpha(160)
             p.setPen(r2_col)
@@ -634,6 +720,8 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
             lw_txt = fm.horizontalAdvance(c.label_left)
             p.drawText(-lw_txt // 2, fm.ascent() // 2, c.label_left)
             p.restore()
+        if self._show_origin_axes:
+            self._paint_origin_axes(p, pr, x0, dx, y0, dy, fg)
         for fit in c.fits:
             if fit.visible and fit.show_formula and len(fit.xs) >= 2:
                 formula = fit.getFormula()
@@ -642,7 +730,7 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
                     mid_idx = len(pts) // 2
                     mid_pt = QPointF(float(pts[mid_idx, 0]), float(pts[mid_idx, 1]))
                     self._draw_formula_tag(p, mid_pt, formula, fg, bg, fm)
-        if self._mouse_pos is not None and not self._rb_active:
+        if self._crosshair_enabled and self._mouse_pos is not None and not self._rb_active:
             self._paint_crosshair_overlay(p, pr, x0, dx, y0, dy, fm, fg, bg)
         if self._show_latest:
             self._paint_latest_points(p, pr, x0, dx, y0, dy, fm)
@@ -653,6 +741,7 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
         for ruler in c.rulers:
             if ruler.visible:
                 self._paint_ruler(p, ruler, pr, x0, dx, y0, dy, fg, bg, fm)
+        c._notify_viewport_changed()
         p.end()
 
     def _paint_crosshair_gl(self, pr, x0, dx, y0, dy, fg_gl, bg_gl):
@@ -676,3 +765,14 @@ class PlotCanvas(CanvasBase, QOpenGLWidget):
         ], dtype=np.float32)
         self._renderer.draw_lines(ch_pts, ch_col, 1.0)
         self._renderer.draw_circle_fill(snap.x(), snap.y(), _SNAP_DOT_R, (*fg_gl[:3], 0.86))
+        if self._show_tangent:
+            slope = self._tangent_slope(item, xi)
+            if slope is not None:
+                half = (c.vx1 - c.vx0) * _TANGENT_HALF_FRAC
+                tp0 = self._to_pt_log(xi - half, yi - slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
+                tp1 = self._to_pt_log(xi + half, yi + slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
+                tg_col = (*fg_gl[:3], 0.55)
+                self._renderer.draw_lines(
+                    np.array([[tp0.x(), tp0.y()], [tp1.x(), tp1.y()]], dtype=np.float32),
+                    tg_col, 1.0, Qt.PenStyle.DotLine,
+                )

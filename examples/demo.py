@@ -87,6 +87,7 @@ class _FunctionRow(QWidget):
     def __init__(self, chart: ChartWidget, expr: str, color: str, parent=None):
         super().__init__(parent)
         self._chart = chart
+        self._chart.setOriginAxesVisible(True)
         self._color = color
         self._fn_item: _FunctionItem = None
 

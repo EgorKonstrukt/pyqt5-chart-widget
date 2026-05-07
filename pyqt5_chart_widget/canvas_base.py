@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 from PyQt5.QtCore import Qt, QRect, QRectF, QPointF
 from PyQt5.QtGui import (QPen, QColor, QBrush, QFont, QFontMetrics,
                          QPainterPath, QPixmap, QWheelEvent, QMouseEvent)
-from PyQt5.QtWidgets import QMenu, QAction, QActionGroup
+from PyQt5.QtWidgets import QMenu, QAction, QActionGroup, QColorDialog
 from .math_utils import nice_ticks, nice_log_ticks, to_log, decimated, fmt, get_fit_modes
 from .items import _LineItem, _ScatterItem, _FitItem, _InfLine, _FunctionItem, _RulerItem
 from .i18n import tr
@@ -37,8 +37,19 @@ _INFLINE_HIT_PX = 6
 _RUBBERBAND_MIN_PX = 4
 _RANGE_SEL_ALPHA = 30
 _SCREEN_Y_CLAMP = 32768.0
-_GRID_PRESETS_X = [("chart_widget.ctx_sparse", 120), ("chart_widget.ctx_normal", 80), ("chart_widget.ctx_dense", 50)]
-_GRID_PRESETS_Y = [("chart_widget.ctx_sparse", 100), ("chart_widget.ctx_normal", 60), ("chart_widget.ctx_dense", 40)]
+_GRID_PRESETS_X = [
+    ("chart_widget.ctx_sparse", 120),
+    ("chart_widget.ctx_normal", 80),
+    ("chart_widget.ctx_dense", 50),
+]
+_GRID_PRESETS_Y = [
+    ("chart_widget.ctx_sparse", 100),
+    ("chart_widget.ctx_normal", 60),
+    ("chart_widget.ctx_dense", 40),
+]
+_ORIGIN_AXIS_ALPHA = 160
+_ORIGIN_TICK_LEN = 4
+_ORIGIN_TICK_STEP_PX = 60
 
 
 def _fmt_axis(v: float) -> str:
@@ -52,15 +63,25 @@ def _fmt_axis(v: float) -> str:
         return f"{v:.6g}"
     if abs_v >= 1:
         if abs_v >= 1000:
-            formatted = f"{v:.0f}"
-        else:
-            formatted = f"{v:.6g}"
-        return formatted
+            return f"{v:.0f}"
+        return f"{v:.6g}"
     for digits in range(1, 10):
         s = f"{v:.{digits}f}".rstrip("0").rstrip(".")
         if float(s) != 0.0:
             return s
     return fmt(v)
+
+
+def _skewness(data: List[float]) -> Optional[float]:
+    """Return sample skewness or None for n < 3."""
+    n = len(data)
+    if n < 3:
+        return None
+    mean = statistics.mean(data)
+    std = statistics.stdev(data)
+    if std == 0:
+        return 0.0
+    return sum(((x - mean) / std) ** 3 for x in data) * n / ((n - 1) * (n - 2))
 
 
 class CanvasBase:
@@ -74,6 +95,9 @@ class CanvasBase:
         self._mouse_pos: Optional[QPointF] = None
         self._show_analytics = False
         self._show_latest = False
+        self._show_origin_axes = False
+        self._show_dots = False
+        self._show_tangent = True
         self._rb_start: Optional[QPointF] = None
         self._rb_end: Optional[QPointF] = None
         self._rb_active = False
@@ -83,6 +107,8 @@ class CanvasBase:
         self._nearest_cache_key: Optional[tuple] = None
         self._nearest_cache_result = None
         self._dragging_ruler_pt = None
+        self._snap_to_data = True
+        self._crosshair_enabled = True
 
     def toggleAnalytics(self):
         self._show_analytics = not self._show_analytics
@@ -92,12 +118,40 @@ class CanvasBase:
         self._show_latest = not self._show_latest
         self.update()
 
+    def toggleOriginAxes(self):
+        self._show_origin_axes = not self._show_origin_axes
+        self.update()
+
+    def toggleCrosshair(self):
+        self._crosshair_enabled = not self._crosshair_enabled
+        self.update()
+
     def _set_analytics(self, v: bool):
         self._show_analytics = v
         self.update()
 
     def _set_latest(self, v: bool):
         self._show_latest = v
+        self.update()
+
+    def _set_origin_axes(self, v: bool):
+        self._show_origin_axes = v
+        self.update()
+
+    def _set_crosshair(self, v: bool):
+        self._crosshair_enabled = v
+        self.update()
+
+    def _set_show_dots(self, v: bool):
+        self._show_dots = v
+        self.update()
+
+    def _set_show_tangent(self, v: bool):
+        self._show_tangent = v
+        self.update()
+
+    def _set_snap_to_data(self, v: bool):
+        self._snap_to_data = v
         self.update()
 
     def setZoomLock(self, lock: str):
@@ -171,6 +225,8 @@ class CanvasBase:
         return (best_xi, best_yi, best_d)
 
     def _find_nearest(self, mouse, pr, x0, dx, y0, dy):
+        if not self._snap_to_data:
+            return None
         key = (int(mouse.x()), int(mouse.y()), x0, dx, y0, dy)
         if self._nearest_cache_key == key:
             return self._nearest_cache_result
@@ -281,9 +337,105 @@ class CanvasBase:
             ddx, ddy = xs[pos + 1] - xs[pos - 1], ys[pos + 1] - ys[pos - 1]
         return ddy / ddx if abs(ddx) > 1e-15 else None
 
+    def _paint_origin_axes(self, p, pr, x0, dx, y0, dy, fg):
+        """Draw calculator-style axes through x=0 and y=0 with tick marks and labels."""
+        c = self._chart
+        log_x, log_y = c.log_x, c.log_y
+        fm = QFontMetrics(c.font)
+        axis_col = QColor(fg)
+        axis_col.setAlpha(_ORIGIN_AXIS_ALPHA)
+        tick_col = QColor(fg)
+        tick_col.setAlpha(120)
+        lbl_col = QColor(fg)
+        lbl_col.setAlpha(180)
+        p.save()
+        p.setClipRect(pr)
+        origin_x_screen = pr.left() + (0.0 - x0) / dx * pr.width() if not log_x else None
+        origin_y_screen = pr.bottom() - (0.0 - y0) / dy * pr.height() if not log_y else None
+        if log_x:
+            origin_x_screen = None
+        if log_y:
+            origin_y_screen = None
+        if origin_x_screen is not None and pr.left() <= origin_x_screen <= pr.right():
+            sx = int(origin_x_screen)
+            p.setPen(QPen(axis_col, 1.5))
+            p.drawLine(sx, pr.top(), sx, pr.bottom())
+            n_y = max(2, pr.height() // max(1, c.grid_px_y))
+            yt = nice_ticks(y0, y0 + dy, n_y) if not log_y else nice_log_ticks(10 ** y0, 10 ** (y0 + dy))
+            p.setPen(QPen(tick_col, 1))
+            p.setFont(c.font)
+            for tv in yt:
+                ty_log = to_log(tv) if log_y else tv
+                sy = int(pr.bottom() - (ty_log - y0) / dy * pr.height())
+                if pr.top() <= sy <= pr.bottom() and abs(tv) > 1e-12:
+                    p.drawLine(sx - _ORIGIN_TICK_LEN, sy, sx + _ORIGIN_TICK_LEN, sy)
+                    lbl = _fmt_axis(tv)
+                    lw = fm.horizontalAdvance(lbl)
+                    lx_pos = sx + _ORIGIN_TICK_LEN + 2
+                    if lx_pos + lw > pr.right():
+                        lx_pos = sx - lw - _ORIGIN_TICK_LEN - 2
+                    p.setPen(lbl_col)
+                    p.drawText(lx_pos, sy + fm.ascent() // 2, lbl)
+                    p.setPen(QPen(tick_col, 1))
+            p.setPen(lbl_col)
+            lbl_y = tr("chart_widget.origin_y_label")
+            p.drawText(sx + 4, pr.top() + fm.height(), lbl_y)
+        if origin_y_screen is not None and pr.top() <= origin_y_screen <= pr.bottom():
+            sy = int(origin_y_screen)
+            p.setPen(QPen(axis_col, 1.5))
+            p.drawLine(pr.left(), sy, pr.right(), sy)
+            n_x = max(2, pr.width() // max(1, c.grid_px_x))
+            xt = nice_ticks(x0, x0 + dx, n_x) if not log_x else nice_log_ticks(10 ** x0, 10 ** (x0 + dx))
+            p.setPen(QPen(tick_col, 1))
+            p.setFont(c.font)
+            for tv in xt:
+                tx_log = to_log(tv) if log_x else tv
+                sx_t = int(pr.left() + (tx_log - x0) / dx * pr.width())
+                if pr.left() <= sx_t <= pr.right() and abs(tv) > 1e-12:
+                    p.drawLine(sx_t, sy - _ORIGIN_TICK_LEN, sx_t, sy + _ORIGIN_TICK_LEN)
+                    lbl = _fmt_axis(tv)
+                    lw = fm.horizontalAdvance(lbl)
+                    ly_pos = sy + fm.height() + 2
+                    if ly_pos + fm.height() > pr.bottom():
+                        ly_pos = sy - 4
+                    p.setPen(lbl_col)
+                    p.drawText(sx_t - lw // 2, ly_pos, lbl)
+                    p.setPen(QPen(tick_col, 1))
+            p.setPen(lbl_col)
+            lbl_x = tr("chart_widget.origin_x_label")
+            p.drawText(pr.right() - fm.horizontalAdvance(lbl_x) - 4, sy - 4, lbl_x)
+        if (origin_x_screen is not None and pr.left() <= origin_x_screen <= pr.right() and
+                origin_y_screen is not None and pr.top() <= origin_y_screen <= pr.bottom()):
+            dot_col = QColor(fg)
+            dot_col.setAlpha(200)
+            p.setPen(QPen(dot_col, 1))
+            p.setBrush(QBrush(dot_col))
+            p.drawEllipse(QPointF(origin_x_screen, origin_y_screen), 3.0, 3.0)
+        p.restore()
+
+    def _paint_data_dots(self, p, pr, x0, dx, y0, dy):
+        """Draw small dots at every data point on line series."""
+        c = self._chart
+        log_x, log_y = c.log_x, c.log_y
+        p.save()
+        p.setClipRect(pr)
+        for item in c.lines:
+            if not item.visible or not item.xs:
+                continue
+            col = item.pen.color()
+            p.setPen(QPen(col.darker(140), 1))
+            p.setBrush(QBrush(col))
+            for xi, yi in zip(item.xs, item.ys):
+                pt = self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, log_x, log_y)
+                if (pr.left() - 4 <= pt.x() <= pr.right() + 4 and
+                        pr.top() - 4 <= pt.y() <= pr.bottom() + 4):
+                    p.drawEllipse(pt, 2.5, 2.5)
+        p.restore()
+
     def _paint_crosshair_lines(self, p, pr, snap, fg):
         """Draw crosshair lines through the snapped graph point."""
-        ch_col = QColor(fg); ch_col.setAlpha(80)
+        ch_col = QColor(fg)
+        ch_col.setAlpha(80)
         p.setPen(QPen(ch_col, 1, Qt.PenStyle.DashLine))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawLine(int(snap.x()), pr.top(), int(snap.x()), pr.bottom())
@@ -291,7 +443,8 @@ class CanvasBase:
 
     def _paint_snap_dot(self, p, snap, fg):
         """Draw filled circle at snap position."""
-        dot_col = QColor(fg); dot_col.setAlpha(220)
+        dot_col = QColor(fg)
+        dot_col.setAlpha(220)
         p.setPen(QPen(dot_col, 1))
         p.setBrush(QBrush(dot_col))
         p.drawEllipse(snap, _SNAP_DOT_R, _SNAP_DOT_R)
@@ -301,9 +454,12 @@ class CanvasBase:
         pad = 4
         th = fm.height() + pad
         rnd = 3
-        bg_ = QColor(bg); bg_.setAlpha(215)
-        br_ = QColor(fg); br_.setAlpha(100)
-        lbl_col = QColor(fg); lbl_col.setAlpha(220)
+        bg_ = QColor(bg)
+        bg_.setAlpha(215)
+        br_ = QColor(fg)
+        br_.setAlpha(100)
+        lbl_col = QColor(fg)
+        lbl_col.setAlpha(220)
         x_lbl = _fmt_axis(xi)
         xlw = fm.horizontalAdvance(x_lbl)
         x_tw = xlw + pad * 2
@@ -338,42 +494,57 @@ class CanvasBase:
         snap = self._to_pt_log(xi, yi, x0, dx, y0, dy, pr, c.log_x, c.log_y)
         self._paint_crosshair_lines(p, pr, snap, fg)
         self._paint_snap_dot(p, snap, fg)
-        slope = self._tangent_slope(item, xi)
-        if slope is not None:
-            half = (c.vx1 - c.vx0) * _TANGENT_HALF_FRAC
-            tp0 = self._to_pt_log(xi - half, yi - slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
-            tp1 = self._to_pt_log(xi + half, yi + slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
-            tg_col = QColor(fg); tg_col.setAlpha(140)
-            p.setPen(QPen(tg_col, 1, Qt.PenStyle.DotLine))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawLine(tp0, tp1)
-        self._paint_tooltip(p, pr, xi, yi, snap, fg, bg, fm)
+        if self._show_tangent:
+            slope = self._tangent_slope(item, xi)
+            if slope is not None:
+                half = (c.vx1 - c.vx0) * _TANGENT_HALF_FRAC
+                tp0 = self._to_pt_log(xi - half, yi - slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
+                tp1 = self._to_pt_log(xi + half, yi + slope * half, x0, dx, y0, dy, pr, c.log_x, c.log_y)
+                tg_col = QColor(fg)
+                tg_col.setAlpha(140)
+                p.setPen(QPen(tg_col, 1, Qt.PenStyle.DotLine))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawLine(tp0, tp1)
+        self._paint_tooltip(p, pr, xi, yi, snap, fg, bg, fm, item)
         self._paint_crosshair_axis_labels(p, pr, xi, yi, snap, fm, fg, bg)
 
-    def _paint_tooltip(self, p, pr, xi, yi, snap, fg, bg, fm):
-        """Draw floating X/Y value tooltip near snap point."""
+    def _paint_tooltip(self, p, pr, xi, yi, snap, fg, bg, fm, item=None):
+        """Draw floating X/Y/slope value tooltip near snap point."""
         p.setFont(self._chart.font)
+        slope = None
+        if self._show_tangent and item is not None:
+            slope = self._tangent_slope(item, xi)
+        series_lbl = ""
+        if item is not None and hasattr(item, "label") and item.label:
+            series_lbl = item.label
         lx = f"{tr('chart_widget.tooltip_x')}: {fmt(xi)}"
         ly = f"{tr('chart_widget.tooltip_y')}: {fmt(yi)}"
-        tw = max(fm.horizontalAdvance(lx), fm.horizontalAdvance(ly)) + 16
-        th = fm.height() * 2 + 12
+        lines = [lx, ly]
+        if slope is not None:
+            lines.append(f"{tr('chart_widget.tooltip_slope')}: {fmt(slope)}")
+        if series_lbl:
+            lines.insert(0, series_lbl)
+        tw = max(fm.horizontalAdvance(l) for l in lines) + 16
+        th = fm.height() * len(lines) + 12
         tx = int(snap.x()) + _TOOLTIP_MARGIN
         ty = int(snap.y()) - th - 4
         if tx + tw > pr.right():
             tx = int(snap.x()) - tw - _TOOLTIP_MARGIN
         if ty < pr.top():
             ty = int(snap.y()) + 8
-        bg_ = QColor(bg); bg_.setAlpha(215)
-        br_ = QColor(fg); br_.setAlpha(100)
+        bg_ = QColor(bg)
+        bg_.setAlpha(215)
+        br_ = QColor(fg)
+        br_.setAlpha(100)
         p.setBrush(QBrush(bg_))
         p.setPen(QPen(br_, 1))
         p.drawRoundedRect(tx, ty, tw, th, 4, 4)
         p.setPen(fg)
-        p.drawText(tx + 8, ty + fm.ascent() + 4, lx)
-        p.drawText(tx + 8, ty + fm.ascent() + 4 + fm.height(), ly)
+        for i, line in enumerate(lines):
+            p.drawText(tx + 8, ty + fm.ascent() + 4 + i * fm.height(), line)
 
     def _paint_analytics(self, p, pr, fg, bg, fm):
-        """Draw analytics statistics table overlay."""
+        """Draw enhanced analytics statistics table overlay with more metrics."""
         from .math_utils import trapezoid_integral
         c = self._chart
         named = []
@@ -390,10 +561,17 @@ class CanvasBase:
         if self._range_sel_x is not None:
             range_lo, range_hi = sorted(self._range_sel_x)
         row_keys = [
-            "chart_widget.analytics_n", "chart_widget.analytics_xmin",
-            "chart_widget.analytics_xmax", "chart_widget.analytics_ymin",
-            "chart_widget.analytics_ymax", "chart_widget.analytics_mean",
-            "chart_widget.analytics_std", "chart_widget.analytics_integral",
+            "chart_widget.analytics_n",
+            "chart_widget.analytics_xmin",
+            "chart_widget.analytics_xmax",
+            "chart_widget.analytics_ymin",
+            "chart_widget.analytics_ymax",
+            "chart_widget.analytics_mean",
+            "chart_widget.analytics_median",
+            "chart_widget.analytics_std",
+            "chart_widget.analytics_range",
+            "chart_widget.analytics_skew",
+            "chart_widget.analytics_integral",
         ]
         row_lbls = [tr(k) for k in row_keys]
         table: List[List[str]] = []
@@ -403,17 +581,26 @@ class CanvasBase:
                 fxs = [pair[0] for pair in pairs]
                 fys = [pair[1] for pair in pairs]
             else:
-                fxs, fys = it.xs, it.ys
+                fxs, fys = list(it.xs), list(it.ys)
             n = len(fxs)
             if n == 0:
                 table.append(["-"] * len(row_keys))
                 continue
-            st = fmt(statistics.stdev(fys)) if n > 1 else "-"
-            intg = fmt(trapezoid_integral(fxs, fys))
+            fys_finite = [v for v in fys if v is not None and math.isfinite(v)]
+            n_fin = len(fys_finite)
+            st = fmt(statistics.stdev(fys_finite)) if n_fin > 1 else "-"
+            med = fmt(statistics.median(fys_finite)) if n_fin >= 1 else "-"
+            rng = fmt(max(fys_finite) - min(fys_finite)) if n_fin >= 1 else "-"
+            sk = _skewness(fys_finite)
+            skew_s = fmt(sk) if sk is not None else "-"
+            intg = fmt(trapezoid_integral(fxs, fys_finite))
             table.append([
-                str(n), fmt(min(fxs)), fmt(max(fxs)),
-                fmt(min(fys)), fmt(max(fys)),
-                fmt(statistics.mean(fys)), st, intg,
+                str(n),
+                fmt(min(fxs)), fmt(max(fxs)),
+                fmt(min(fys_finite)) if fys_finite else "-",
+                fmt(max(fys_finite)) if fys_finite else "-",
+                fmt(statistics.mean(fys_finite)) if n_fin >= 1 else "-",
+                med, st, rng, skew_s, intg,
             ])
         lbl_w = max(fm.horizontalAdvance(l) for l in row_lbls) + 10
         val_w = max(fm.horizontalAdvance(v) for row in table for v in row) + 10
@@ -425,14 +612,19 @@ class CanvasBase:
         total_h = pad * 2 + hdr_h + rh * len(row_lbls)
         ax = pr.right() - total_w - 4
         ay = pr.top() + 4
-        bg_ = QColor(bg); bg_.setAlpha(210)
-        brd_ = QColor(fg); brd_.setAlpha(70)
+        bg_ = QColor(bg)
+        bg_.setAlpha(210)
+        brd_ = QColor(fg)
+        brd_.setAlpha(70)
         p.setBrush(QBrush(bg_))
         p.setPen(QPen(brd_, 1))
         p.drawRoundedRect(ax, ay, total_w, total_h, 4, 4)
-        bold_f = QFont(self._chart.font); bold_f.setBold(True)
-        hdr_col = QColor(fg); hdr_col.setAlpha(220)
-        lbl_col = QColor(fg); lbl_col.setAlpha(150)
+        bold_f = QFont(self._chart.font)
+        bold_f.setBold(True)
+        hdr_col = QColor(fg)
+        hdr_col.setAlpha(220)
+        lbl_col = QColor(fg)
+        lbl_col.setAlpha(150)
         for ci, (name, _) in enumerate(named):
             cx = ax + pad + lbl_w + ci * val_w + val_w // 2
             p.setFont(bold_f)
@@ -441,6 +633,12 @@ class CanvasBase:
         p.setFont(self._chart.font)
         for ri, lbl in enumerate(row_lbls):
             ry = ay + pad + hdr_h + ri * rh
+            sep_col = QColor(fg)
+            sep_col.setAlpha(20)
+            if ri % 2 == 0:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(sep_col))
+                p.drawRect(ax + 1, ry - 1, total_w - 2, rh)
             p.setPen(lbl_col)
             p.drawText(ax + pad, ry + fm.ascent(), lbl)
             p.setPen(hdr_col)
@@ -451,7 +649,7 @@ class CanvasBase:
                 p.drawText(cx + (val_w - vw) // 2, ry + fm.ascent(), val)
 
     def _paint_legend(self, p, pr, fg, bg, fm):
-        """Draw series legend overlay."""
+        """Draw series legend overlay with color swatches and type indicators."""
         c = self._chart
         entries = []
         for i, it in enumerate(c.lines + c.lines_r2):
@@ -486,8 +684,10 @@ class CanvasBase:
         total_h = pad * 2 + row_h * len(entries)
         lx = pr.right() - max_w - 4
         ly = pr.bottom() - total_h - 4
-        bg_ = QColor(bg); bg_.setAlpha(200)
-        brd_ = QColor(fg); brd_.setAlpha(60)
+        bg_ = QColor(bg)
+        bg_.setAlpha(200)
+        brd_ = QColor(fg)
+        brd_.setAlpha(60)
         p.setBrush(QBrush(bg_))
         p.setPen(QPen(brd_, 1))
         p.drawRoundedRect(lx, ly, max_w, total_h, 4, 4)
@@ -503,12 +703,13 @@ class CanvasBase:
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 mid_y = ry + sw // 2
                 p.drawLine(lx + pad, mid_y, lx + pad + sw, mid_y)
-            txt_col = QColor(fg); txt_col.setAlpha(210)
+            txt_col = QColor(fg)
+            txt_col.setAlpha(210)
             p.setPen(txt_col)
             p.drawText(lx + pad + sw + 6, ry + fm.ascent(), label)
 
     def _paint_ruler(self, p, ruler, pr, x0, dx, y0, dy, fg, bg, fm):
-        """Draw ruler overlay with handles and distance label."""
+        """Draw ruler overlay with handles, angle arc, and distance label."""
         c = self._chart
         log_x, log_y = c.log_x, c.log_y
         pt0 = self._to_pt_log(ruler.x0, ruler.y0, x0, dx, y0, dy, pr, log_x, log_y)
@@ -516,21 +717,31 @@ class CanvasBase:
         p.setPen(ruler.pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawLine(pt0, pt1)
-        handle_col = QColor(ruler.pen.color()); handle_col.setAlpha(200)
+        handle_col = QColor(ruler.pen.color())
+        handle_col.setAlpha(200)
         p.setPen(QPen(handle_col, 1))
         p.setBrush(QBrush(handle_col))
         r = float(ruler.handle_radius)
         p.drawEllipse(pt0, r, r)
         p.drawEllipse(pt1, r, r)
         mid = QPointF((pt0.x() + pt1.x()) / 2.0, (pt0.y() + pt1.y()) / 2.0)
-        dist_lbl = f"d={fmt(ruler.distance)}  dx={fmt(ruler.dx)}  dy={fmt(ruler.dy)}"
+        angle_deg = ruler.angle_deg
+        dist_lbl = tr(
+            "chart_widget.ruler_label",
+            d=fmt(ruler.distance),
+            dx=fmt(ruler.dx),
+            dy=fmt(ruler.dy),
+            angle=f"{angle_deg:.1f}",
+        )
         tw = fm.horizontalAdvance(dist_lbl)
         th = fm.height()
         pad = 4
         tx = int(mid.x()) - tw // 2
         ty = int(mid.y()) - th - 6
-        bg_ = QColor(bg); bg_.setAlpha(210)
-        br_ = QColor(fg); br_.setAlpha(80)
+        bg_ = QColor(bg)
+        bg_.setAlpha(210)
+        br_ = QColor(fg)
+        br_.setAlpha(80)
         p.setBrush(QBrush(bg_))
         p.setPen(QPen(br_, 1))
         p.drawRoundedRect(tx - pad, ty - pad // 2, tw + pad * 2, th + pad, 3, 3)
@@ -545,8 +756,10 @@ class CanvasBase:
         th = fm.height() + pad
         tx = int(pt.x()) + 6
         ty = int(pt.y()) - th - 4
-        bg_ = QColor(bg); bg_.setAlpha(200)
-        br_ = QColor(fg); br_.setAlpha(80)
+        bg_ = QColor(bg)
+        bg_.setAlpha(200)
+        br_ = QColor(fg)
+        br_.setAlpha(80)
         p.setBrush(QBrush(bg_))
         p.setPen(QPen(br_, 1))
         p.drawRoundedRect(tx, ty, tw, th, 3, 3)
@@ -576,7 +789,8 @@ class CanvasBase:
             ly = to_log(yi) if log_y else yi
             sx = pr.left() + (lx - x0) / dx * pr.width()
             sy = pr.bottom() - (ly - y0) / dy * pr.height()
-            line_col = QColor(color); line_col.setAlpha(180)
+            line_col = QColor(color)
+            line_col.setAlpha(180)
             p.setPen(QPen(line_col, 1.5, Qt.PenStyle.DashLine))
             p.setBrush(Qt.BrushStyle.NoBrush)
             if pr.top() <= sy <= pr.bottom():
@@ -613,30 +827,88 @@ class CanvasBase:
                 p.setPen(txt_col)
                 p.drawText(ytx + pad, yty + fm.ascent(), y_lbl)
 
+    def _copy_coords_to_clipboard(self):
+        """Copy current mouse data coordinates to the clipboard."""
+        from PyQt5.QtWidgets import QApplication
+        pr = self._plot_rect()
+        if self._mouse_pos is None:
+            return
+        c = self._chart
+        x0, x1, y0, y1, dx, dy = self._view_params(pr)
+        xv, yv = self._screen_to_data(
+            self._mouse_pos.x(), self._mouse_pos.y(),
+            x0, dx, y0, dy, pr, c.log_x, c.log_y,
+        )
+        nearest = self._find_nearest(self._mouse_pos, pr, x0, dx, y0, dy)
+        if nearest is not None:
+            xv, yv = nearest[0], nearest[1]
+        QApplication.clipboard().setText(f"{fmt(xv)}\t{fmt(yv)}")
+
     def _build_context_menu(self) -> QMenu:
+        """Build the right-click context menu."""
         c = self._chart
         menu = QMenu(self)
+
         act_autofit = QAction(tr("chart_widget.btn_autofit_toggle"), menu)
         act_autofit.setCheckable(True)
         act_autofit.setChecked(c._autofit_enabled)
         act_autofit.triggered.connect(c.setAutofitEnabled)
         menu.addAction(act_autofit)
+
         act_latest = QAction(tr("chart_widget.btn_latest"), menu)
         act_latest.setCheckable(True)
         act_latest.setChecked(self._show_latest)
         act_latest.triggered.connect(self._set_latest)
         menu.addAction(act_latest)
+
         act_analytics = QAction(tr("chart_widget.btn_analytics"), menu)
         act_analytics.setCheckable(True)
         act_analytics.setChecked(self._show_analytics)
         act_analytics.triggered.connect(self._set_analytics)
         menu.addAction(act_analytics)
+
         act_legend = QAction(tr("chart_widget.ctx_legend"), menu)
         act_legend.setCheckable(True)
         act_legend.setChecked(c.show_legend)
         act_legend.triggered.connect(c.setLegendVisible)
         menu.addAction(act_legend)
+
         menu.addSeparator()
+
+        display_menu = menu.addMenu(tr("chart_widget.ctx_display"))
+
+        act_origin = QAction(tr("chart_widget.ctx_origin_axes"), display_menu)
+        act_origin.setCheckable(True)
+        act_origin.setChecked(self._show_origin_axes)
+        act_origin.triggered.connect(self._set_origin_axes)
+        display_menu.addAction(act_origin)
+
+        act_crosshair = QAction(tr("chart_widget.ctx_crosshair"), display_menu)
+        act_crosshair.setCheckable(True)
+        act_crosshair.setChecked(self._crosshair_enabled)
+        act_crosshair.triggered.connect(self._set_crosshair)
+        display_menu.addAction(act_crosshair)
+
+        act_tangent = QAction(tr("chart_widget.ctx_tangent"), display_menu)
+        act_tangent.setCheckable(True)
+        act_tangent.setChecked(self._show_tangent)
+        act_tangent.triggered.connect(self._set_show_tangent)
+        display_menu.addAction(act_tangent)
+
+        act_snap = QAction(tr("chart_widget.ctx_snap_to_data"), display_menu)
+        act_snap.setCheckable(True)
+        act_snap.setChecked(self._snap_to_data)
+        act_snap.triggered.connect(self._set_snap_to_data)
+        display_menu.addAction(act_snap)
+
+        act_dots = QAction(tr("chart_widget.ctx_show_dots"), display_menu)
+        act_dots.setCheckable(True)
+        act_dots.setChecked(self._show_dots)
+        act_dots.triggered.connect(self._set_show_dots)
+        display_menu.addAction(act_dots)
+
+        menu.addSeparator()
+
         log_menu = menu.addMenu(tr("chart_widget.ctx_log_scale"))
         act_log_x = QAction("Log X", log_menu)
         act_log_x.setCheckable(True)
@@ -648,20 +920,33 @@ class CanvasBase:
         act_log_y.setChecked(c.log_y)
         act_log_y.triggered.connect(lambda v: c.setLogScale(y=v))
         log_menu.addAction(act_log_y)
+
         lock_menu = menu.addMenu(tr("chart_widget.ctx_zoom_lock"))
         grp_lock = QActionGroup(lock_menu)
         grp_lock.setExclusive(True)
-        for key, lbl in (("both", tr("chart_widget.ctx_zoom_both")), ("x", "X only"), ("y", "Y only")):
+        for key, lbl in (
+            ("both", tr("chart_widget.ctx_zoom_both")),
+            ("x", tr("chart_widget.ctx_zoom_x")),
+            ("y", tr("chart_widget.ctx_zoom_y")),
+        ):
             act = QAction(lbl, lock_menu)
             act.setCheckable(True)
             act.setChecked(self._zoom_lock == key)
             act.triggered.connect(lambda checked, k=key: self.setZoomLock(k))
             lock_menu.addAction(act)
             grp_lock.addAction(act)
+
         menu.addSeparator()
+
         fit_menu = menu.addMenu(tr("chart_widget.ctx_approximation"))
         grp = QActionGroup(fit_menu)
         grp.setExclusive(True)
+        none_act = QAction("None", fit_menu)
+        none_act.setCheckable(True)
+        none_act.setChecked(c._active_fit_key is None)
+        none_act.triggered.connect(lambda: c._on_fit_mode_selected(None))
+        fit_menu.addAction(none_act)
+        grp.addAction(none_act)
         for mode in get_fit_modes():
             act = QAction(mode.label, fit_menu)
             act.setCheckable(True)
@@ -669,7 +954,9 @@ class CanvasBase:
             act.triggered.connect(lambda checked, k=mode.key: c._on_fit_mode_selected(k))
             fit_menu.addAction(act)
             grp.addAction(act)
+
         menu.addSeparator()
+
         grid_menu = menu.addMenu(tr("chart_widget.ctx_grid"))
         x_menu = grid_menu.addMenu(tr("chart_widget.ctx_grid_x"))
         grp_x = QActionGroup(x_menu)
@@ -691,14 +978,48 @@ class CanvasBase:
             act.triggered.connect(lambda checked, v=px: c.setGridDensity(c.grid_px_x, v))
             y_menu.addAction(act)
             grp_y.addAction(act)
+
         menu.addSeparator()
+
+        rulers_menu = menu.addMenu(tr("chart_widget.ctx_rulers"))
+        act_add_ruler = QAction(tr("chart_widget.ctx_add_ruler"), rulers_menu)
+        act_add_ruler.triggered.connect(self._add_ruler_at_view_center)
+        rulers_menu.addAction(act_add_ruler)
+        if c.rulers:
+            act_clear_rulers = QAction(tr("chart_widget.ctx_clear_rulers"), rulers_menu)
+            act_clear_rulers.triggered.connect(self._clear_all_rulers)
+            rulers_menu.addAction(act_clear_rulers)
+
+        menu.addSeparator()
+
         if self._range_sel_x is not None:
             menu.addAction(tr("chart_widget.ctx_clear_range"), self.clearRangeSelection)
+
+        act_copy = QAction(tr("chart_widget.ctx_copy_coords"), menu)
+        act_copy.triggered.connect(self._copy_coords_to_clipboard)
+        menu.addAction(act_copy)
+
         menu.addAction(tr("chart_widget.ctx_export_csv"), c.exportCsv)
         menu.addAction(tr("chart_widget.ctx_export_img"), c.exportImage)
         menu.addSeparator()
         menu.addAction(tr("chart_widget.ctx_reset_view"), c.autofit)
         return menu
+
+    def _add_ruler_at_view_center(self):
+        """Add a ruler centered in the current viewport."""
+        c = self._chart
+        cx = (c.vx0 + c.vx1) / 2.0
+        cy = (c.vy0 + c.vy1) / 2.0
+        qx = (c.vx1 - c.vx0) * 0.15
+        qy = (c.vy1 - c.vy0) * 0.15
+        ruler = c.addRuler(cx - qx, cy - qy, cx + qx, cy + qy)
+        ruler.setVisible(True)
+
+    def _clear_all_rulers(self):
+        """Remove all rulers from the chart."""
+        c = self._chart
+        for ruler in list(c.rulers):
+            c.removeItem(ruler)
 
     def wheelEvent(self, ev: QWheelEvent):
         pr = self._plot_rect()

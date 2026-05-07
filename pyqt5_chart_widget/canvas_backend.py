@@ -1,15 +1,11 @@
-"""
-Automatic canvas backend selection.
+"""Automatic canvas backend selection.
 
 Priority order:
-  1. OpenGL (PyOpenGL + numpy available AND runtime GL context is usable)
+  1. ModernGL (moderngl available AND runtime GL 3.3 context is usable)
   2. Software QPainter fallback (_PlotCanvas from canvas.py)
 
 The GL probe creates a temporary QOffscreenSurface + QOpenGLContext to verify
-that OpenGL is actually functional at runtime before committing to the GL
-backend.  This prevents the Access Violation crash on Windows that occurs when
-QOpenGLWidget is instantiated on systems where the GL driver is broken, missing,
-or the surface cannot be created inside a QTabWidget before the window is shown.
+that OpenGL 3.3 Core is functional before committing to the ModernGL backend.
 """
 from __future__ import annotations
 
@@ -21,8 +17,7 @@ _PROBED = False
 def _probe_gl() -> bool:
     global _GL_ERROR
     try:
-        import numpy
-        import OpenGL.GL
+        import moderngl
     except Exception as exc:
         _GL_ERROR = f"import failed: {exc}"
         return False
@@ -33,7 +28,8 @@ def _probe_gl() -> bool:
             _GL_ERROR = "no QApplication instance"
             return False
         fmt = QSurfaceFormat()
-        fmt.setVersion(2, 1)
+        fmt.setVersion(3, 3)
+        fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
         surface = QOffscreenSurface()
         surface.setFormat(fmt)
         surface.create()
@@ -48,12 +44,19 @@ def _probe_gl() -> bool:
         if not ctx.makeCurrent(surface):
             _GL_ERROR = "makeCurrent() failed"
             return False
-        from OpenGL.GL import glGetString, GL_VERSION
-        ver = glGetString(GL_VERSION)
+        try:
+            mgl = moderngl.create_context()
+            ver = mgl.version_code
+            mgl.release()
+        except Exception as exc:
+            _GL_ERROR = f"moderngl context failed: {exc}"
+            ctx.doneCurrent()
+            surface.destroy()
+            return False
         ctx.doneCurrent()
         surface.destroy()
-        if ver is None:
-            _GL_ERROR = "glGetString(GL_VERSION) returned None"
+        if ver < 330:
+            _GL_ERROR = f"GL version {ver} < 330 required"
             return False
         return True
     except Exception as exc:
@@ -70,22 +73,15 @@ def _ensure_probed():
 
 
 def make_canvas(chart) -> object:
-    """
-    Instantiate the best available canvas for *chart*.
-
-    Returns a PlotCanvas (OpenGL) when OpenGL is confirmed functional at runtime,
-    otherwise falls back to the software _PlotCanvas transparently.
-    Both expose an identical public interface.
-    """
+    """Return best available canvas for *chart*: ModernGL or software fallback."""
     global _GL_ERROR
     _ensure_probed()
     if _GL_AVAILABLE:
         from .gl_canvas import PlotCanvas
         return PlotCanvas(chart)
-    else:
-        _GL_ERROR = "gl_canvas is not available"
-        from .canvas import _PlotCanvas
-        return _PlotCanvas(chart)
+    _GL_ERROR = "gl_canvas is not available"
+    from .canvas import _PlotCanvas
+    return _PlotCanvas(chart)
 
 
 def backend_name() -> str:
@@ -95,12 +91,12 @@ def backend_name() -> str:
 
 
 def gl_available() -> bool:
-    """Return True if the OpenGL backend is available and will be used."""
+    """Return True if the ModernGL backend is available and will be used."""
     _ensure_probed()
     return _GL_AVAILABLE
 
 
 def gl_error() -> str:
-    """Return the import error string when OpenGL is unavailable, else ''."""
+    """Return the error string when OpenGL is unavailable, else ''."""
     _ensure_probed()
     return _GL_ERROR

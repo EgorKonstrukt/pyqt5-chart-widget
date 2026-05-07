@@ -144,6 +144,176 @@ def _cubic_spline_eval(x_pts: List[float], y_pts: List[float], x_eval: List[floa
     return result
 
 
+def _exp_fit(x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> Optional[List[float]]:
+    """Fit y = a * exp(b*x) via linear regression on log(y)."""
+    pairs = [(x, y) for x, y in zip(x_pts, y_pts) if y > 0]
+    if len(pairs) < 2:
+        return None
+    xs2 = [p[0] for p in pairs]
+    lys = [math.log(p[1]) for p in pairs]
+    n = len(xs2)
+    sx = sum(xs2)
+    sy = sum(lys)
+    sxx = sum(xi * xi for xi in xs2)
+    sxy = sum(xi * li for xi, li in zip(xs2, lys))
+    denom = n * sxx - sx * sx
+    if abs(denom) < 1e-15:
+        return None
+    b = (n * sxy - sx * sy) / denom
+    a = math.exp((sy - b * sx) / n)
+    return [a * math.exp(b * xi) for xi in x_eval]
+
+
+def _exp_formula(x_pts: List[float], y_pts: List[float]) -> str:
+    pairs = [(x, y) for x, y in zip(x_pts, y_pts) if y > 0]
+    if len(pairs) < 2:
+        return ""
+    xs2 = [p[0] for p in pairs]
+    lys = [math.log(p[1]) for p in pairs]
+    n = len(xs2)
+    sx = sum(xs2)
+    sy = sum(lys)
+    sxx = sum(xi * xi for xi in xs2)
+    sxy = sum(xi * li for xi, li in zip(xs2, lys))
+    denom = n * sxx - sx * sx
+    if abs(denom) < 1e-15:
+        return ""
+    b = (n * sxy - sx * sy) / denom
+    a = math.exp((sy - b * sx) / n)
+    sign = "+" if b >= 0 else "-"
+    return f"y = {fmt(a)}·e^({sign}{fmt(abs(b))}·x)"
+
+
+def _power_fit(x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> Optional[List[float]]:
+    """Fit y = a * x^b via linear regression on log-log."""
+    pairs = [(x, y) for x, y in zip(x_pts, y_pts) if x > 0 and y > 0]
+    if len(pairs) < 2:
+        return None
+    lxs = [math.log(p[0]) for p in pairs]
+    lys = [math.log(p[1]) for p in pairs]
+    n = len(lxs)
+    sx = sum(lxs)
+    sy = sum(lys)
+    sxx = sum(xi * xi for xi in lxs)
+    sxy = sum(xi * li for xi, li in zip(lxs, lys))
+    denom = n * sxx - sx * sx
+    if abs(denom) < 1e-15:
+        return None
+    b = (n * sxy - sx * sy) / denom
+    a = math.exp((sy - b * sx) / n)
+    result = []
+    for xi in x_eval:
+        if xi > 0:
+            result.append(a * (xi ** b))
+        else:
+            result.append(None)
+    return result
+
+
+def _power_formula(x_pts: List[float], y_pts: List[float]) -> str:
+    pairs = [(x, y) for x, y in zip(x_pts, y_pts) if x > 0 and y > 0]
+    if len(pairs) < 2:
+        return ""
+    lxs = [math.log(p[0]) for p in pairs]
+    lys = [math.log(p[1]) for p in pairs]
+    n = len(lxs)
+    sx = sum(lxs)
+    sy = sum(lys)
+    sxx = sum(xi * xi for xi in lxs)
+    sxy = sum(xi * li for xi, li in zip(lxs, lys))
+    denom = n * sxx - sx * sx
+    if abs(denom) < 1e-15:
+        return ""
+    b = (n * sxy - sx * sy) / denom
+    a = math.exp((sy - b * sx) / n)
+    return f"y = {fmt(a)}·x^{fmt(b)}"
+
+
+def _log_fit(x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> Optional[List[float]]:
+    """Fit y = a + b * ln(x)."""
+    pairs = [(x, y) for x, y in zip(x_pts, y_pts) if x > 0]
+    if len(pairs) < 2:
+        return None
+    lxs = [math.log(p[0]) for p in pairs]
+    ys2 = [p[1] for p in pairs]
+    n = len(lxs)
+    slx = sum(lxs)
+    sy = sum(ys2)
+    slxlx = sum(lx * lx for lx in lxs)
+    slxy = sum(lx * yi for lx, yi in zip(lxs, ys2))
+    denom = n * slxlx - slx * slx
+    if abs(denom) < 1e-15:
+        return None
+    b = (n * slxy - slx * sy) / denom
+    a = (sy - b * slx) / n
+    result = []
+    for xi in x_eval:
+        if xi > 0:
+            result.append(a + b * math.log(xi))
+        else:
+            result.append(None)
+    return result
+
+
+def _log_formula(x_pts: List[float], y_pts: List[float]) -> str:
+    pairs = [(x, y) for x, y in zip(x_pts, y_pts) if x > 0]
+    if len(pairs) < 2:
+        return ""
+    lxs = [math.log(p[0]) for p in pairs]
+    ys2 = [p[1] for p in pairs]
+    n = len(lxs)
+    slx = sum(lxs)
+    sy = sum(ys2)
+    slxlx = sum(lx * lx for lx in lxs)
+    slxy = sum(lx * yi for lx, yi in zip(lxs, ys2))
+    denom = n * slxlx - slx * slx
+    if abs(denom) < 1e-15:
+        return ""
+    b = (n * slxy - slx * sy) / denom
+    a = (sy - b * slx) / n
+    sign = "+" if b >= 0 else "-"
+    return f"y = {fmt(a)} {sign} {fmt(abs(b))}·ln(x)"
+
+
+def _sinusoidal_fit(x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> Optional[List[float]]:
+    """Estimate sinusoidal fit y ≈ A*sin(2π/T * x + φ) + C using FFT-based period guess."""
+    n = len(x_pts)
+    if n < 4:
+        return None
+    try:
+        import math as _m
+        ys = y_pts
+        y_mean = sum(ys) / n
+        y_centered = [v - y_mean for v in ys]
+        x_range = x_pts[-1] - x_pts[0]
+        if x_range <= 0:
+            return None
+        T_guess = x_range / 2.0
+        omega = 2 * _m.pi / T_guess
+        sc = sum(y_centered[i] * _m.sin(omega * x_pts[i]) for i in range(n))
+        cc = sum(y_centered[i] * _m.cos(omega * x_pts[i]) for i in range(n))
+        A = 2 * _m.sqrt(sc ** 2 + cc ** 2) / n
+        phi = _m.atan2(sc, cc)
+        return [A * _m.sin(omega * xi + phi) + y_mean for xi in x_eval]
+    except Exception:
+        return None
+
+
+def _moving_average_fit(x_pts: List[float], y_pts: List[float], x_eval: List[float]) -> List[float]:
+    """Smooth via moving average with window = max(3, n//5)."""
+    n = len(y_pts)
+    win = max(3, n // 5)
+    half = win // 2
+    smoothed_x = []
+    smoothed_y = []
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        smoothed_x.append(x_pts[i])
+        smoothed_y.append(sum(y_pts[lo:hi]) / (hi - lo))
+    return _pchip_eval(smoothed_x, smoothed_y, x_eval)
+
+
 FitFn = Callable[[List[float], List[float], List[float]], List[float]]
 
 
@@ -248,6 +418,27 @@ def _fit_cubic_spline(x_pts, y_pts, x_eval):
     return _cubic_spline_eval(x_pts, y_pts, x_eval)
 
 
+def _fit_exp(x_pts, y_pts, x_eval):
+    result = _exp_fit(x_pts, y_pts, x_eval)
+    if result is None:
+        return [0.0] * len(x_eval)
+    return result
+
+
+def _fit_power(x_pts, y_pts, x_eval):
+    result = _power_fit(x_pts, y_pts, x_eval)
+    if result is None:
+        return [None] * len(x_eval)
+    return result
+
+
+def _fit_log(x_pts, y_pts, x_eval):
+    result = _log_fit(x_pts, y_pts, x_eval)
+    if result is None:
+        return [None] * len(x_eval)
+    return result
+
+
 def trapezoid_integral(xs: List[float], ys: List[float],
                        x_lo: Optional[float] = None, x_hi: Optional[float] = None) -> float:
     if _CY:
@@ -269,14 +460,69 @@ def trapezoid_integral(xs: List[float], ys: List[float],
     return total
 
 
+def rms(ys: List[float]) -> float:
+    """Root mean square of a sequence."""
+    if not ys:
+        return 0.0
+    return math.sqrt(sum(v * v for v in ys) / len(ys))
+
+
+def percentile(data: List[float], p: float) -> float:
+    """Return the p-th percentile (0–100) of data using linear interpolation."""
+    n = len(data)
+    if n == 0:
+        return float("nan")
+    if n == 1:
+        return data[0]
+    sorted_data = sorted(data)
+    pos = (p / 100.0) * (n - 1)
+    lo = int(pos)
+    hi = lo + 1
+    if hi >= n:
+        return sorted_data[-1]
+    frac = pos - lo
+    return sorted_data[lo] + frac * (sorted_data[hi] - sorted_data[lo])
+
+
+def correlation(xs: List[float], ys: List[float]) -> Optional[float]:
+    """Pearson correlation coefficient between two sequences."""
+    n = len(xs)
+    if n < 2 or len(ys) != n:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    num = sum((xi - mx) * (yi - my) for xi, yi in zip(xs, ys))
+    dx2 = sum((xi - mx) ** 2 for xi in xs)
+    dy2 = sum((yi - my) ** 2 for yi in ys)
+    denom = math.sqrt(dx2 * dy2)
+    return num / denom if denom > 1e-15 else None
+
+
+def r_squared(xs: List[float], ys: List[float], fit_ys: List[float]) -> Optional[float]:
+    """Coefficient of determination R² for a fit."""
+    n = len(ys)
+    if n < 2 or len(fit_ys) != n:
+        return None
+    mean_y = sum(ys) / n
+    ss_res = sum((yi - fi) ** 2 for yi, fi in zip(ys, fit_ys))
+    ss_tot = sum((yi - mean_y) ** 2 for yi in ys)
+    return 1.0 - ss_res / ss_tot if ss_tot > 1e-15 else None
+
+
 _BUILTIN_MODES: List[FitMode] = [
-    FitMode("linear_origin", "Linear (origin)", _fit_linear_origin, 1, _formula_linear_origin),
-    FitMode("linear",        "Linear",           _fit_linear,         2, _formula_linear),
-    FitMode("poly2",         "Polynomial 2°",    _make_poly_fit(2),   2, _make_poly_formula(2)),
-    FitMode("poly3",         "Polynomial 3°",    _make_poly_fit(3),   2, _make_poly_formula(3)),
-    FitMode("poly4",         "Polynomial 4°",    _make_poly_fit(4),   2, _make_poly_formula(4)),
-    FitMode("pchip",         "PCHIP",            _fit_pchip,          2),
-    FitMode("spline",        "Cubic Spline",      _fit_cubic_spline,   2),
+    FitMode("linear_origin", "Linear (origin)",  _fit_linear_origin,     1,  _formula_linear_origin),
+    FitMode("linear",        "Linear",            _fit_linear,             2,  _formula_linear),
+    FitMode("poly2",         "Polynomial 2°",     _make_poly_fit(2),       2,  _make_poly_formula(2)),
+    FitMode("poly3",         "Polynomial 3°",     _make_poly_fit(3),       2,  _make_poly_formula(3)),
+    FitMode("poly4",         "Polynomial 4°",     _make_poly_fit(4),       2,  _make_poly_formula(4)),
+    FitMode("poly5",         "Polynomial 5°",     _make_poly_fit(5),       2,  _make_poly_formula(5)),
+    FitMode("pchip",         "PCHIP",             _fit_pchip,              2),
+    FitMode("spline",        "Cubic Spline",      _fit_cubic_spline,       2),
+    FitMode("exp",           "Exponential",       _fit_exp,                2,  _exp_formula),
+    FitMode("power",         "Power",             _fit_power,              2,  _power_formula),
+    FitMode("log",           "Logarithmic",       _fit_log,                2,  _log_formula),
+    FitMode("sine",          "Sinusoidal",        _sinusoidal_fit,         4),
+    FitMode("moving_avg",    "Moving Average",    _moving_average_fit,     3),
 ]
 
 _REGISTRY: Dict[str, FitMode] = {m.key: m for m in _BUILTIN_MODES}
@@ -374,8 +620,7 @@ def fmt(v: float) -> str:
     if abs_v >= 10:
         return f"{v:.1f}"
     if abs_v >= 1:
-        s = f"{v:.4g}"
-        return s
+        return f"{v:.4g}"
     for digits in range(1, 10):
         s = f"{v:.{digits}f}".rstrip("0").rstrip(".")
         if float(s) != 0.0:
